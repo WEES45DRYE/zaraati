@@ -1,10 +1,19 @@
 from flask import Flask, request, jsonify, redirect, url_for, session, make_response
 from jinja2 import Environment
-import sqlite3, os, json
+import sqlite3, os, json, re
 from functools import wraps
+from werkzeug.utils import secure_filename
 
 app = Flask(__name__)
 app.secret_key = "zaraati_secret_2024"
+
+UPLOAD_FOLDER = 'static/uploads'
+ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'webp', 'gif'}
+app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
+os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+
+def allowed_file(filename):
+    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
 TEMPLATES = {
     "app": """<!DOCTYPE html>
@@ -17,27 +26,21 @@ TEMPLATES = {
 *{margin:0;padding:0;box-sizing:border-box}
 :root{--green:#2e7d32;--light-green:#4caf50;--bg:#f5f7f5;--card:#fff;--text:#1a1a1a;--gray:#666;--border:#e0e0e0}
 body{font-family:'Segoe UI',Arial,sans-serif;background:var(--bg);color:var(--text);max-width:430px;margin:0 auto;min-height:100vh;position:relative}
-/* Header */
 .header{background:var(--green);color:#fff;padding:16px;display:flex;justify-content:space-between;align-items:center;position:sticky;top:0;z-index:100;box-shadow:0 2px 8px rgba(0,0,0,.2)}
 .header h1{font-size:20px;font-weight:700}
 .cart-btn{background:rgba(255,255,255,.2);border:none;color:#fff;padding:8px 14px;border-radius:20px;cursor:pointer;font-size:14px;display:flex;align-items:center;gap:6px}
 .cart-badge{background:#ff5722;color:#fff;border-radius:50%;padding:2px 7px;font-size:12px;font-weight:700}
-/* Nav */
 .bottom-nav{position:fixed;bottom:0;left:50%;transform:translateX(-50%);width:100%;max-width:430px;background:#fff;display:flex;border-top:1px solid var(--border);z-index:100}
 .nav-btn{flex:1;padding:10px 0;border:none;background:none;cursor:pointer;font-size:22px;color:var(--gray);display:flex;flex-direction:column;align-items:center;font-size:11px;gap:2px}
 .nav-btn span{font-size:22px}
 .nav-btn.active{color:var(--green)}
-.nav-btn.active span{filter:drop-shadow(0 0 3px var(--green))}
-/* Pages */
 .page{display:none;padding:16px;padding-bottom:80px}
 .page.active{display:block}
-/* Banner */
 .banner{background:linear-gradient(135deg,var(--green),#1b5e20);color:#fff;border-radius:16px;padding:20px;margin-bottom:20px;position:relative;overflow:hidden}
 .banner::after{content:'🌿';position:absolute;right:-10px;top:-10px;font-size:80px;opacity:.15}
 .banner h2{font-size:18px;margin-bottom:6px}
 .banner p{font-size:13px;opacity:.85;margin-bottom:14px}
 .banner-btn{background:#fff;color:var(--green);border:none;padding:8px 20px;border-radius:20px;font-weight:700;cursor:pointer;font-size:13px}
-/* Categories */
 .section-title{font-size:16px;font-weight:700;margin-bottom:12px;color:var(--text)}
 .cats{display:flex;gap:10px;overflow-x:auto;padding-bottom:6px;scrollbar-width:none}
 .cats::-webkit-scrollbar{display:none}
@@ -45,11 +48,11 @@ body{font-family:'Segoe UI',Arial,sans-serif;background:var(--bg);color:var(--te
 .cat-card.active,.cat-card:hover{border-color:var(--light-green);background:#f1f8f1}
 .cat-card .icon{font-size:26px}
 .cat-card .name{font-size:11px;margin-top:4px;color:var(--gray)}
-/* Products */
 .products-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
 .product-card{background:#fff;border-radius:14px;overflow:hidden;box-shadow:0 1px 6px rgba(0,0,0,.08);cursor:pointer;transition:.2s}
 .product-card:hover{transform:translateY(-2px);box-shadow:0 4px 12px rgba(0,0,0,.12)}
-.product-img{height:110px;background:linear-gradient(135deg,#e8f5e9,#c8e6c9);display:flex;align-items:center;justify-content:center;font-size:44px}
+.product-img{height:110px;background:linear-gradient(135deg,#e8f5e9,#c8e6c9);display:flex;align-items:center;justify-content:center;font-size:44px;overflow:hidden}
+.product-img img{width:100%;height:100%;object-fit:contain;padding:8px}
 .product-info{padding:10px}
 .product-name{font-size:13px;font-weight:600;margin-bottom:4px}
 .product-unit{font-size:11px;color:var(--gray)}
@@ -57,11 +60,10 @@ body{font-family:'Segoe UI',Arial,sans-serif;background:var(--bg);color:var(--te
 .price{color:var(--green);font-weight:700;font-size:15px}
 .old-price{color:#aaa;font-size:12px;text-decoration:line-through}
 .add-btn{width:100%;margin-top:8px;background:var(--green);color:#fff;border:none;border-radius:8px;padding:7px;cursor:pointer;font-size:13px}
-/* Loading */
 .loading{text-align:center;padding:40px;color:var(--gray)}
-/* Cart Page */
 .cart-item{background:#fff;border-radius:12px;padding:14px;margin-bottom:10px;display:flex;gap:12px;align-items:center;box-shadow:0 1px 4px rgba(0,0,0,.07)}
-.cart-item-img{width:56px;height:56px;border-radius:10px;background:linear-gradient(135deg,#e8f5e9,#c8e6c9);display:flex;align-items:center;justify-content:center;font-size:26px;flex-shrink:0}
+.cart-item-img{width:56px;height:56px;border-radius:10px;background:linear-gradient(135deg,#e8f5e9,#c8e6c9);display:flex;align-items:center;justify-content:center;font-size:26px;flex-shrink:0;overflow:hidden}
+.cart-item-img img{width:100%;height:100%;object-fit:contain;padding:4px}
 .cart-item-info{flex:1}
 .cart-item-name{font-size:14px;font-weight:600}
 .cart-item-price{font-size:13px;color:var(--green);font-weight:700;margin-top:2px}
@@ -74,7 +76,6 @@ body{font-family:'Segoe UI',Arial,sans-serif;background:var(--bg);color:var(--te
 .checkout-btn{width:100%;background:var(--green);color:#fff;border:none;border-radius:12px;padding:14px;font-size:16px;font-weight:700;margin-top:14px;cursor:pointer}
 .empty{text-align:center;padding:50px 20px;color:var(--gray)}
 .empty .icon{font-size:60px;margin-bottom:12px}
-/* Order Modal */
 .modal{display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.5);z-index:200;justify-content:center;align-items:flex-end}
 .modal.open{display:flex}
 .modal-box{background:#fff;width:100%;max-width:430px;border-radius:20px 20px 0 0;padding:24px;max-height:85vh;overflow-y:auto}
@@ -84,29 +85,20 @@ body{font-family:'Segoe UI',Arial,sans-serif;background:var(--bg);color:var(--te
 .form-group input,.form-group textarea{width:100%;border:1px solid var(--border);border-radius:10px;padding:11px;font-size:14px;font-family:inherit;outline:none;transition:.2s}
 .form-group input:focus,.form-group textarea:focus{border-color:var(--light-green)}
 .submit-order-btn{width:100%;background:var(--green);color:#fff;border:none;border-radius:12px;padding:14px;font-size:16px;font-weight:700;cursor:pointer;margin-top:6px}
-.close-modal{position:absolute;top:16px;left:16px;background:none;border:none;font-size:22px;cursor:pointer;color:var(--gray)}
-/* Orders Page */
 .order-card{background:#fff;border-radius:14px;padding:14px;margin-bottom:10px;box-shadow:0 1px 4px rgba(0,0,0,.07)}
 .order-header{display:flex;justify-content:space-between;margin-bottom:8px}
 .order-num{font-weight:700;color:var(--green)}
 .order-status{padding:3px 10px;border-radius:20px;font-size:12px;font-weight:600}
-.status-جديد{background:#e3f2fd;color:#1565c0}
-.status-قيد-التنفيذ,.status-قيد\\ التنفيذ{background:#fff3e0;color:#e65100}
-.status-تم-التوصيل,.status-تم\\ التوصيل{background:#e8f5e9;color:#2e7d32}
-.status-ملغي{background:#ffebee;color:#c62828}
 .order-date{font-size:12px;color:var(--gray)}
 .order-total{font-size:15px;font-weight:700;color:var(--green);margin-top:4px}
-/* Profile */
 .profile-header{background:linear-gradient(135deg,var(--green),#1b5e20);color:#fff;border-radius:16px;padding:24px;text-align:center;margin-bottom:16px}
 .profile-avatar{width:70px;height:70px;background:rgba(255,255,255,.2);border-radius:50%;margin:0 auto 12px;display:flex;align-items:center;justify-content:center;font-size:32px}
 .menu-item{background:#fff;border-radius:12px;padding:14px 16px;margin-bottom:8px;display:flex;align-items:center;gap:12px;cursor:pointer;box-shadow:0 1px 4px rgba(0,0,0,.06)}
 .menu-icon{font-size:20px;width:36px;text-align:center}
 .menu-text{flex:1;font-size:14px}
 .menu-arrow{color:var(--gray)}
-/* Toast */
 .toast{position:fixed;bottom:90px;left:50%;transform:translateX(-50%);background:var(--green);color:#fff;padding:10px 24px;border-radius:20px;font-size:14px;font-weight:600;opacity:0;transition:.3s;z-index:300;pointer-events:none;white-space:nowrap}
 .toast.show{opacity:1}
-/* Spinner */
 .spinner{width:32px;height:32px;border:3px solid var(--border);border-top-color:var(--green);border-radius:50%;animation:spin .8s linear infinite;margin:30px auto}
 @keyframes spin{to{transform:rotate(360deg)}}
 </style>
@@ -120,7 +112,6 @@ body{font-family:'Segoe UI',Arial,sans-serif;background:var(--bg);color:var(--te
   </button>
 </div>
 
-<!-- ═══ صفحة الرئيسية ═══ -->
 <div class="page active" id="page-home">
   <div class="banner">
     <h2>خصم 20% على الأسمدة</h2>
@@ -133,20 +124,17 @@ body{font-family:'Segoe UI',Arial,sans-serif;background:var(--bg);color:var(--te
   <div class="products-grid" id="products-grid"><div class="spinner"></div></div>
 </div>
 
-<!-- ═══ صفحة السلة ═══ -->
 <div class="page" id="page-cart">
   <p class="section-title">سلة التسوق</p>
   <div id="cart-list"></div>
   <div id="cart-total"></div>
 </div>
 
-<!-- ═══ صفحة الطلبات ═══ -->
 <div class="page" id="page-orders">
   <p class="section-title">طلباتي</p>
   <div id="orders-list"><div class="spinner"></div></div>
 </div>
 
-<!-- ═══ صفحة الحساب ═══ -->
 <div class="page" id="page-profile">
   <div class="profile-header">
     <div class="profile-avatar">👤</div>
@@ -159,7 +147,6 @@ body{font-family:'Segoe UI',Arial,sans-serif;background:var(--bg);color:var(--te
   <div class="menu-item"><div class="menu-icon">📞</div><div class="menu-text">تواصل معنا</div><div class="menu-arrow">←</div></div>
 </div>
 
-<!-- ═══ نافذة الطلب ═══ -->
 <div class="modal" id="order-modal">
   <div class="modal-box">
     <div class="modal-title">إتمام الطلب</div>
@@ -181,7 +168,6 @@ body{font-family:'Segoe UI',Arial,sans-serif;background:var(--bg);color:var(--te
   </div>
 </div>
 
-<!-- ═══ التنقل السفلي ═══ -->
 <div class="bottom-nav">
   <button class="nav-btn active" onclick="showPage('home')"><span>🏠</span>الرئيسية</button>
   <button class="nav-btn" onclick="showPage('cart')"><span>🛒</span>السلة</button>
@@ -192,12 +178,11 @@ body{font-family:'Segoe UI',Arial,sans-serif;background:var(--bg);color:var(--te
 <div class="toast" id="toast"></div>
 
 <script>
-const API = "";  // نفس السيرفر
+const API = "";
 let cart = JSON.parse(localStorage.getItem("cart")||"[]");
 let allProducts = [];
 let activeCat = 0;
 
-// ─── Pages ────────────────────────────────────────────────
 function showPage(name){
   document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
   document.querySelectorAll('.nav-btn').forEach(b=>b.classList.remove('active'));
@@ -208,14 +193,12 @@ function showPage(name){
   if(name==='cart') renderCart();
 }
 
-// ─── Toast ────────────────────────────────────────────────
 function toast(msg){
   const t=document.getElementById('toast');
   t.textContent=msg; t.classList.add('show');
   setTimeout(()=>t.classList.remove('show'),2000);
 }
 
-// ─── Categories ──────────────────────────────────────────
 async function loadCategories(){
   const res = await fetch(API+'/api/categories');
   const cats = await res.json();
@@ -233,7 +216,6 @@ function filterCat(id, el){
   renderProducts(id ? allProducts.filter(p=>p.category_id==id) : allProducts);
 }
 
-// ─── Products ─────────────────────────────────────────────
 const EMOJIS = {1:"🦟",2:"🌱",3:"🍄",4:"🌾"};
 
 async function loadProducts(){
@@ -247,7 +229,11 @@ function renderProducts(products){
   if(!products.length){g.innerHTML='<div class="loading">لا توجد منتجات</div>';return;}
   g.innerHTML = products.map(p=>`
     <div class="product-card">
-      <div class="product-img">${EMOJIS[p.category_id]||'🌿'}</div>
+      <div class="product-img">
+        ${p.image_url
+          ? `<img src="${p.image_url}" alt="${p.name}">`
+          : (EMOJIS[p.category_id]||'🌿')}
+      </div>
       <div class="product-info">
         <div class="product-name">${p.name}</div>
         <div class="product-unit">${p.unit}</div>
@@ -255,16 +241,15 @@ function renderProducts(products){
           <span class="price">${p.price} ج</span>
           ${p.old_price?`<span class="old-price">${p.old_price} ج</span>`:''}
         </div>
-        <button class="add-btn" onclick="addToCart(${p.id},'${p.name}',${p.price},'${p.unit}',${p.category_id})">+ أضف للسلة</button>
+        <button class="add-btn" onclick="addToCart(${p.id},'${p.name}',${p.price},'${p.unit}',${p.category_id},'${p.image_url||''}')">+ أضف للسلة</button>
       </div>
     </div>`).join('');
 }
 
-// ─── Cart ─────────────────────────────────────────────────
-function addToCart(id,name,price,unit,catId){
+function addToCart(id,name,price,unit,catId,imageUrl){
   const existing = cart.find(i=>i.id==id);
   if(existing){ existing.qty++; }
-  else { cart.push({id,name,price,unit,catId,qty:1}); }
+  else { cart.push({id,name,price,unit,catId,imageUrl,qty:1}); }
   saveCart(); toast('✅ تم الإضافة للسلة');
 }
 
@@ -282,7 +267,11 @@ function renderCart(){
   }
   el.innerHTML = cart.map(i=>`
     <div class="cart-item">
-      <div class="cart-item-img">${EMOJIS[i.catId]||'🌿'}</div>
+      <div class="cart-item-img">
+        ${i.imageUrl
+          ? `<img src="${i.imageUrl}" alt="${i.name}">`
+          : (EMOJIS[i.catId]||'🌿')}
+      </div>
       <div class="cart-item-info">
         <div class="cart-item-name">${i.name}</div>
         <div class="cart-item-price">${i.price} ج / ${i.unit}</div>
@@ -317,7 +306,6 @@ function removeItem(id){
   saveCart(); renderCart();
 }
 
-// ─── Order ────────────────────────────────────────────────
 function openModal(){
   if(!cart.length){toast('السلة فارغة!');return;}
   const subtotal = cart.reduce((s,i)=>s+i.price*i.qty,0);
@@ -347,15 +335,12 @@ async function submitOrder(){
   btn.disabled=false; btn.textContent='✅ تأكيد الطلب';
 }
 
-// ─── Orders ──────────────────────────────────────────────
 async function loadOrders(){
   const el = document.getElementById('orders-list');
   el.innerHTML='<div class="spinner"></div>';
-  // هنجيب الطلبات من localStorage (لإن مفيش login)
   el.innerHTML='<div class="empty"><div class="icon">📦</div><div>طلباتك ستظهر هنا بعد الشراء</div></div>';
 }
 
-// ─── Init ─────────────────────────────────────────────────
 saveCart();
 loadCategories();
 loadProducts();
@@ -363,6 +348,7 @@ loadProducts();
 </body>
 </html>
 """,
+
     "admin_login": """<!DOCTYPE html>
 <html lang="ar" dir="rtl">
 <head>
@@ -405,6 +391,7 @@ input:focus{border-color:#4caf50}
 </body>
 </html>
 """,
+
     "admin_base": """<!DOCTYPE html>
 <html lang="ar" dir="rtl">
 <head>
@@ -436,8 +423,8 @@ td{padding:12px 14px;font-size:13px;border-bottom:1px solid #f0f0f0;vertical-ali
 tr:hover td{background:#f9fdf9}
 .badge{padding:3px 10px;border-radius:20px;font-size:12px;font-weight:600;display:inline-block}
 .badge-جديد{background:#e3f2fd;color:#1565c0}
-.badge-قيد\\ التنفيذ{background:#fff3e0;color:#e65100}
-.badge-تم\\ التوصيل{background:#e8f5e9;color:#2e7d32}
+.badge-قيد\ التنفيذ{background:#fff3e0;color:#e65100}
+.badge-تم\ التوصيل{background:#e8f5e9;color:#2e7d32}
 .badge-ملغي{background:#ffebee;color:#c62828}
 .btn{padding:8px 16px;border-radius:8px;border:none;cursor:pointer;font-size:13px;font-weight:600;text-decoration:none;display:inline-block}
 .btn-green{background:var(--green);color:#fff}
@@ -449,11 +436,15 @@ tr:hover td{background:#f9fdf9}
 .form-group{margin-bottom:14px}
 .form-group label{display:block;font-size:13px;color:#555;margin-bottom:5px;font-weight:600}
 .form-group input,.form-group select,.form-group textarea{width:100%;border:1px solid #ddd;border-radius:8px;padding:9px 12px;font-size:13px;font-family:inherit;outline:none;transition:.2s}
+.form-group input[type=file]{padding:6px;cursor:pointer}
 .form-group input:focus,.form-group select:focus{border-color:var(--lg)}
+.img-preview{width:80px;height:80px;border-radius:10px;object-fit:contain;border:1px solid #ddd;background:#f9f9f9;padding:4px;margin-top:6px;display:none}
+.img-preview.show{display:block}
 .modal-overlay{display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.4);z-index:200;justify-content:center;align-items:center}
 .modal-overlay.open{display:flex}
 .modal-box{background:#fff;border-radius:16px;padding:24px;width:500px;max-height:85vh;overflow-y:auto;box-shadow:0 8px 32px rgba(0,0,0,.15)}
 .modal-title{font-size:17px;font-weight:700;margin-bottom:18px;padding-bottom:12px;border-bottom:1px solid #eee}
+.prod-thumb-table{width:50px;height:50px;border-radius:8px;object-fit:contain;background:#f1f8f1;border:1px solid #e0e0e0;padding:3px}
 @media(max-width:900px){.stat-cards{grid-template-columns:1fr 1fr}.sidebar{display:none}.main{margin-right:0}}
 </style>
 </head>
@@ -473,6 +464,7 @@ tr:hover td{background:#f9fdf9}
 </body>
 </html>
 """,
+
     "admin_index": """{% extends "admin_base.html" %}
 {% set page = "home" %}
 {% block content %}
@@ -480,40 +472,19 @@ tr:hover td{background:#f9fdf9}
   <h2>📊 لوحة التحكم</h2>
   <span style="color:#888;font-size:13px">مرحباً، {{ session.admin }} 👋</span>
 </div>
-
 <div class="stat-cards">
-  <div class="stat-card">
-    <div class="stat-icon">📦</div>
-    <div class="stat-val">{{ stats.products }}</div>
-    <div class="stat-label">إجمالي المنتجات</div>
-  </div>
-  <div class="stat-card">
-    <div class="stat-icon">🛒</div>
-    <div class="stat-val">{{ stats.orders }}</div>
-    <div class="stat-label">إجمالي الطلبات</div>
-  </div>
-  <div class="stat-card">
-    <div class="stat-icon">🔔</div>
-    <div class="stat-val">{{ stats.new_orders }}</div>
-    <div class="stat-label">طلبات جديدة</div>
-  </div>
-  <div class="stat-card">
-    <div class="stat-icon">💰</div>
-    <div class="stat-val">{{ "%.0f"|format(stats.revenue) }} ج</div>
-    <div class="stat-label">إجمالي الإيرادات</div>
-  </div>
+  <div class="stat-card"><div class="stat-icon">📦</div><div class="stat-val">{{ stats.products }}</div><div class="stat-label">إجمالي المنتجات</div></div>
+  <div class="stat-card"><div class="stat-icon">🛒</div><div class="stat-val">{{ stats.orders }}</div><div class="stat-label">إجمالي الطلبات</div></div>
+  <div class="stat-card"><div class="stat-icon">🔔</div><div class="stat-val">{{ stats.new_orders }}</div><div class="stat-label">طلبات جديدة</div></div>
+  <div class="stat-card"><div class="stat-icon">💰</div><div class="stat-val">{{ "%.0f"|format(stats.revenue) }} ج</div><div class="stat-label">إجمالي الإيرادات</div></div>
 </div>
-
 <div class="card">
   <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
     <strong>آخر الطلبات</strong>
     <a href="/admin/orders" style="color:var(--green);font-size:13px;text-decoration:none">عرض الكل ←</a>
   </div>
   <table>
-    <thead><tr>
-      <th>رقم الطلب</th><th>العميل</th><th>الهاتف</th>
-      <th>الإجمالي</th><th>الحالة</th><th>التاريخ</th><th>إجراء</th>
-    </tr></thead>
+    <thead><tr><th>رقم الطلب</th><th>العميل</th><th>الهاتف</th><th>الإجمالي</th><th>الحالة</th><th>التاريخ</th><th>إجراء</th></tr></thead>
     <tbody>
     {% for o in orders %}
     <tr>
@@ -533,6 +504,7 @@ tr:hover td{background:#f9fdf9}
 </div>
 {% endblock %}
 """,
+
     "admin_products": """{% extends "admin_base.html" %}
 {% set page = "products" %}
 {% block content %}
@@ -543,30 +515,33 @@ tr:hover td{background:#f9fdf9}
 
 <table>
   <thead><tr>
-    <th>#</th><th>الاسم</th><th>التصنيف</th>
+    <th>#</th><th>الصورة</th><th>الاسم</th><th>التصنيف</th>
     <th>السعر</th><th>السعر القديم</th><th>المخزون</th><th>الوحدة</th><th>إجراءات</th>
   </tr></thead>
   <tbody>
   {% for p in products %}
   <tr>
     <td>{{ p.id }}</td>
+    <td>
+      {% if p.image_url %}
+        <img src="{{ p.image_url }}" class="prod-thumb-table" alt="{{ p.name }}">
+      {% else %}
+        <div style="width:50px;height:50px;border-radius:8px;background:#eaf3de;display:flex;align-items:center;justify-content:center;font-size:22px">🌿</div>
+      {% endif %}
+    </td>
     <td><strong>{{ p.name }}</strong></td>
     <td>{{ p.cat_name }}</td>
     <td>{{ p.price }} ج</td>
     <td>{{ p.old_price or '—' }}</td>
-    <td>
-      <span style="color:{% if p.stock < 10 %}#f44336{% else %}#2e7d32{% endif %}">
-        {{ p.stock }}
-      </span>
-    </td>
+    <td><span style="color:{% if p.stock < 10 %}#f44336{% else %}#2e7d32{% endif %}">{{ p.stock }}</span></td>
     <td>{{ p.unit }}</td>
     <td style="display:flex;gap:6px">
-      <button class="btn btn-orange btn-sm" onclick="editProduct({{ p.id }},'{{ p.name }}','{{ p.description or '' }}',{{ p.price }},{{ p.old_price or 0 }},{{ p.stock }},{{ p.category_id }},'{{ p.unit }}')">تعديل</button>
+      <button class="btn btn-orange btn-sm" onclick="editProduct({{ p.id }},'{{ p.name }}','{{ p.description or '' }}',{{ p.price }},{{ p.old_price or 0 }},{{ p.stock }},{{ p.category_id }},'{{ p.unit }}','{{ p.image_url or '' }}')">تعديل</button>
       <a href="/admin/products/delete/{{ p.id }}" class="btn btn-red btn-sm" onclick="return confirm('حذف المنتج؟')">حذف</a>
     </td>
   </tr>
   {% else %}
-  <tr><td colspan="8" style="text-align:center;color:#888;padding:30px">لا توجد منتجات</td></tr>
+  <tr><td colspan="9" style="text-align:center;color:#888;padding:30px">لا توجد منتجات</td></tr>
   {% endfor %}
   </tbody>
 </table>
@@ -575,7 +550,7 @@ tr:hover td{background:#f9fdf9}
 <div class="modal-overlay" id="add-modal">
   <div class="modal-box">
     <div class="modal-title">➕ إضافة منتج جديد</div>
-    <form method="POST" action="/admin/products/add">
+    <form method="POST" action="/admin/products/add" enctype="multipart/form-data">
       <div class="form-row">
         <div class="form-group"><label>اسم المنتج *</label><input name="name" required></div>
         <div class="form-group"><label>التصنيف *</label>
@@ -598,6 +573,11 @@ tr:hover td{background:#f9fdf9}
           </select>
         </div>
       </div>
+      <div class="form-group">
+        <label>صورة المنتج</label>
+        <input type="file" name="image" accept="image/*" onchange="previewImg(this,'add-preview')">
+        <img id="add-preview" class="img-preview" alt="معاينة الصورة">
+      </div>
       <div style="display:flex;gap:10px">
         <button type="submit" class="btn btn-green" style="flex:1">حفظ المنتج</button>
         <button type="button" class="btn" style="flex:1;background:#eee;color:#333" onclick="document.getElementById('add-modal').classList.remove('open')">إلغاء</button>
@@ -610,7 +590,7 @@ tr:hover td{background:#f9fdf9}
 <div class="modal-overlay" id="edit-modal">
   <div class="modal-box">
     <div class="modal-title">✏️ تعديل المنتج</div>
-    <form method="POST" id="edit-form">
+    <form method="POST" id="edit-form" enctype="multipart/form-data">
       <div class="form-row">
         <div class="form-group"><label>اسم المنتج</label><input name="name" id="e-name" required></div>
         <div class="form-group"><label>التصنيف</label>
@@ -633,6 +613,11 @@ tr:hover td{background:#f9fdf9}
           </select>
         </div>
       </div>
+      <div class="form-group">
+        <label>صورة المنتج (اتركه فارغ لو مش عايز تغير)</label>
+        <input type="file" name="image" accept="image/*" onchange="previewImg(this,'edit-preview')">
+        <img id="edit-preview" class="img-preview" alt="معاينة الصورة">
+      </div>
       <div style="display:flex;gap:10px">
         <button type="submit" class="btn btn-green" style="flex:1">حفظ التعديلات</button>
         <button type="button" class="btn" style="flex:1;background:#eee;color:#333" onclick="document.getElementById('edit-modal').classList.remove('open')">إلغاء</button>
@@ -642,7 +627,16 @@ tr:hover td{background:#f9fdf9}
 </div>
 
 <script>
-function editProduct(id,name,desc,price,oprice,stock,catId,unit){
+function previewImg(input, previewId){
+  const preview = document.getElementById(previewId);
+  if(input.files && input.files[0]){
+    const reader = new FileReader();
+    reader.onload = e => { preview.src = e.target.result; preview.classList.add('show'); };
+    reader.readAsDataURL(input.files[0]);
+  }
+}
+
+function editProduct(id,name,desc,price,oprice,stock,catId,unit,imageUrl){
   document.getElementById('edit-form').action='/admin/products/edit/'+id;
   document.getElementById('e-name').value=name;
   document.getElementById('e-desc').value=desc;
@@ -651,11 +645,15 @@ function editProduct(id,name,desc,price,oprice,stock,catId,unit){
   document.getElementById('e-stock').value=stock;
   document.getElementById('e-cat').value=catId;
   document.getElementById('e-unit').value=unit;
+  const preview = document.getElementById('edit-preview');
+  if(imageUrl){ preview.src=imageUrl; preview.classList.add('show'); }
+  else { preview.classList.remove('show'); }
   document.getElementById('edit-modal').classList.add('open');
 }
 </script>
 {% endblock %}
 """,
+
     "admin_orders": """{% extends "admin_base.html" %}
 {% set page = "orders" %}
 {% block content %}
@@ -684,6 +682,7 @@ function editProduct(id,name,desc,price,oprice,stock,catId,unit){
 </table>
 {% endblock %}
 """,
+
     "admin_order_detail": """{% extends "admin_base.html" %}
 {% set page = "orders" %}
 {% block content %}
@@ -691,7 +690,6 @@ function editProduct(id,name,desc,price,oprice,stock,catId,unit){
   <h2>📋 تفاصيل الطلب #{{ order.id }}</h2>
   <a href="/admin/orders">← الرجوع</a>
 </div>
-
 <div style="display:grid;grid-template-columns:1fr 1fr;gap:18px">
   <div class="card">
     <strong style="font-size:15px">👤 بيانات العميل</strong>
@@ -719,7 +717,6 @@ function editProduct(id,name,desc,price,oprice,stock,catId,unit){
     </form>
   </div>
 </div>
-
 <div class="card">
   <strong style="font-size:15px">🛒 المنتجات المطلوبة</strong>
   <hr style="margin:12px 0">
@@ -743,6 +740,7 @@ function editProduct(id,name,desc,price,oprice,stock,catId,unit){
 </div>
 {% endblock %}
 """,
+
     "admin_categories": """{% extends "admin_base.html" %}
 {% set page = "categories" %}
 {% block content %}
@@ -750,7 +748,6 @@ function editProduct(id,name,desc,price,oprice,stock,catId,unit){
   <h2>🗂 التصنيفات</h2>
   <button class="btn btn-green" onclick="document.getElementById('add-modal').classList.add('open')">+ إضافة تصنيف</button>
 </div>
-
 <table>
   <thead><tr><th>#</th><th>الأيقونة</th><th>الاسم</th><th>عدد المنتجات</th></tr></thead>
   <tbody>
@@ -764,7 +761,6 @@ function editProduct(id,name,desc,price,oprice,stock,catId,unit){
   {% endfor %}
   </tbody>
 </table>
-
 <div class="modal-overlay" id="add-modal">
   <div class="modal-box">
     <div class="modal-title">➕ إضافة تصنيف</div>
@@ -784,20 +780,15 @@ function editProduct(id,name,desc,price,oprice,stock,catId,unit){
 """,
 }
 
+
 def render(name, **ctx):
-    from jinja2 import Environment
     env = Environment()
-    # handle extends
     tmpl_str = TEMPLATES[name]
-    # simple extends handling
-    import re
     extends_match = re.search(r'{%\s*extends\s*"([^"]+)"\s*%}', tmpl_str)
     if extends_match:
-        base_name = extends_match.group(1).replace('.html','')
+        base_name = extends_match.group(1).replace('.html', '')
         base_str = TEMPLATES[base_name]
-        # get blocks from child
         child_blocks = dict(re.findall(r'{%\s*block\s+(\w+)\s*%}(.*?){%\s*endblock\s*%}', tmpl_str, re.DOTALL))
-        # replace blocks in base
         def replace_block(m):
             bname = m.group(1)
             return child_blocks.get(bname, m.group(2))
@@ -807,9 +798,9 @@ def render(name, **ctx):
     ctx['session'] = session
     return make_response(tmpl.render(**ctx))
 
+
 DB = "zaraati.db"
 
-# ─── قاعدة البيانات ─────────────────────────────────────────
 def get_db():
     conn = sqlite3.connect(DB)
     conn.row_factory = sqlite3.Row
@@ -860,27 +851,29 @@ def init_db():
             password TEXT
         );
     """)
-    # بيانات أولية
     existing = c.execute("SELECT COUNT(*) FROM categories").fetchone()[0]
     if existing == 0:
         c.executemany("INSERT INTO categories (name, icon) VALUES (?,?)", [
-            ("مبيدات حشرية","🦟"),("أسمدة","🌱"),("مبيدات فطرية","🍄"),("مبيدات أعشاب","🌾"),
+            ("مبيدات حشرية", "🦟"),
+            ("أسمدة", "🌱"),
+            ("مبيدات فطرية", "🍄"),
+            ("مبيدات أعشاب", "🌾"),
         ])
-        c.executemany("""INSERT INTO products (name,description,price,old_price,stock,category_id,unit) VALUES (?,?,?,?,?,?,?)""", [
-            ("بيستيسايد برو","مبيد حشري فعال ضد الآفات",85,100,50,1,"لتر"),
-            ("كلورابيرفوس","مبيد حشري للتربة والنبات",65,None,30,1,"كيلو"),
-            ("نيتروجين بلس","سماد نيتروجيني عالي التركيز",120,150,80,2,"كيلو"),
-            ("سوبر فوسفات","سماد فوسفاتي لتحسين الجذور",55,None,60,2,"كيلو"),
-            ("ريدوميل جولد","مبيد فطري واسع الطيف",95,110,40,3,"كيلو"),
-            ("فيتافاكس","معالجة بذور ضد الأمراض الفطرية",75,None,25,3,"كيلو"),
-            ("راوند اب","مبيد أعشاب غير انتقائي",110,130,35,4,"لتر"),
-            ("سيليكت سوبر","مبيد أعشاب انتقائي",88,None,20,4,"لتر"),
+        c.executemany("""INSERT INTO products (name,description,price,old_price,stock,category_id,unit,image_url) VALUES (?,?,?,?,?,?,?,?)""", [
+            ("بيستيسايد برو", "مبيد حشري فعال ضد الآفات", 85, 100, 50, 1, "لتر", ""),
+            ("كلورابيرفوس", "مبيد حشري للتربة والنبات", 65, None, 30, 1, "كيلو", ""),
+            ("نيتروجين بلس", "سماد نيتروجيني عالي التركيز", 120, 150, 80, 2, "كيلو", ""),
+            ("سوبر فوسفات", "سماد فوسفاتي لتحسين الجذور", 55, None, 60, 2, "كيلو", ""),
+            ("ريدوميل جولد", "مبيد فطري واسع الطيف", 95, 110, 40, 3, "كيلو", ""),
+            ("فيتافاكس", "معالجة بذور ضد الأمراض الفطرية", 75, None, 25, 3, "كيلو", ""),
+            ("راوند اب", "مبيد أعشاب غير انتقائي", 110, 130, 35, 4, "لتر", ""),
+            ("سيليكت سوبر", "مبيد أعشاب انتقائي", 88, None, 20, 4, "لتر", ""),
         ])
         c.execute("INSERT OR IGNORE INTO admins (username, password) VALUES ('admin','admin123')")
     conn.commit()
     conn.close()
 
-# ─── Admin Auth ──────────────────────────────────────────────
+
 def login_required(f):
     @wraps(f)
     def decorated(*args, **kwargs):
@@ -889,7 +882,9 @@ def login_required(f):
         return f(*args, **kwargs)
     return decorated
 
-# ─── API للتطبيق ─────────────────────────────────────────────
+
+# ── API ──────────────────────────────────────────────────────
+
 @app.route("/api/categories")
 def api_categories():
     conn = get_db()
@@ -913,7 +908,7 @@ def api_product(pid):
     conn = get_db()
     row = conn.execute("SELECT p.*,c.name as cat_name FROM products p LEFT JOIN categories c ON p.category_id=c.id WHERE p.id=?", (pid,)).fetchone()
     conn.close()
-    return jsonify(dict(row)) if row else (jsonify({"error":"not found"}),404)
+    return jsonify(dict(row)) if row else (jsonify({"error": "not found"}), 404)
 
 @app.route("/api/orders", methods=["POST"])
 def api_place_order():
@@ -930,14 +925,24 @@ def api_place_order():
     conn.close()
     return jsonify({"success": True, "order_id": oid})
 
-# ─── Admin Panel ──────────────────────────────────────────────
-@app.route("/admin/login", methods=["GET","POST"])
+
+# ── Static uploads ───────────────────────────────────────────
+
+@app.route('/static/uploads/<filename>')
+def uploaded_file(filename):
+    from flask import send_from_directory
+    return send_from_directory(app.config['UPLOAD_FOLDER'], filename)
+
+
+# ── Admin ────────────────────────────────────────────────────
+
+@app.route("/admin/login", methods=["GET", "POST"])
 def admin_login():
     error = ""
     if request.method == "POST":
         u, p = request.form["username"], request.form["password"]
         conn = get_db()
-        admin = conn.execute("SELECT * FROM admins WHERE username=? AND password=?", (u,p)).fetchone()
+        admin = conn.execute("SELECT * FROM admins WHERE username=? AND password=?", (u, p)).fetchone()
         conn.close()
         if admin:
             session["admin"] = u
@@ -977,12 +982,20 @@ def admin_products():
 @login_required
 def admin_add_product():
     f = request.form
+    image_url = ''
+    if 'image' in request.files:
+        file = request.files['image']
+        if file and file.filename and allowed_file(file.filename):
+            filename = secure_filename(file.filename)
+            file.save(os.path.join(app.config['UPLOAD_FOLDER'], filename))
+            image_url = f'/static/uploads/{filename}'
     conn = get_db()
-    conn.execute("INSERT INTO products (name,description,price,old_price,stock,category_id,unit) VALUES (?,?,?,?,?,?,?)",
-        (f["name"], f["description"], float(f["price"]),
+    conn.execute("INSERT INTO products (name,description,price,old_price,stock,category_id,unit,image_url) VALUES (?,?,?,?,?,?,?,?)",
+        (f["name"], f.get("description", ""), float(f["price"]),
          float(f["old_price"]) if f.get("old_price") else None,
-         int(f["stock"]), int(f["category_id"]), f["unit"]))
-    conn.commit(); conn.close()
+         int(f["stock"]), int(f["category_id"]), f["unit"], image_url))
+    conn.commit()
+    conn.close()
     return redirect("/admin/products")
 
 @app.route("/admin/products/edit/<int:pid>", methods=["POST"])
@@ -990,11 +1003,27 @@ def admin_add_product():
 def admin_edit_product(pid):
     f = request.form
     conn = get_db()
-    conn.execute("UPDATE products SET name=?,description=?,price=?,old_price=?,stock=?,category_id=?,unit=? WHERE id=?",
-        (f["name"], f["description"], float(f["price"]),
-         float(f["old_price"]) if f.get("old_price") else None,
-         int(f["stock"]), int(f["category_id"]), f["unit"], pid))
-    conn.commit(); conn.close()
+    # check if new image uploaded
+    new_image_url = None
+    if 'image' in request.files:
+        file = request.files['image']
+        if file and file.filename and allowed_file(file.filename):
+            filename = secure_filename(file.filename)
+            file.save(os.path.join(app.config['UPLOAD_FOLDER'], filename))
+            new_image_url = f'/static/uploads/{filename}'
+
+    if new_image_url:
+        conn.execute("UPDATE products SET name=?,description=?,price=?,old_price=?,stock=?,category_id=?,unit=?,image_url=? WHERE id=?",
+            (f["name"], f.get("description", ""), float(f["price"]),
+             float(f["old_price"]) if f.get("old_price") else None,
+             int(f["stock"]), int(f["category_id"]), f["unit"], new_image_url, pid))
+    else:
+        conn.execute("UPDATE products SET name=?,description=?,price=?,old_price=?,stock=?,category_id=?,unit=? WHERE id=?",
+            (f["name"], f.get("description", ""), float(f["price"]),
+             float(f["old_price"]) if f.get("old_price") else None,
+             int(f["stock"]), int(f["category_id"]), f["unit"], pid))
+    conn.commit()
+    conn.close()
     return redirect("/admin/products")
 
 @app.route("/admin/products/delete/<int:pid>")
@@ -1002,7 +1031,8 @@ def admin_edit_product(pid):
 def admin_delete_product(pid):
     conn = get_db()
     conn.execute("DELETE FROM products WHERE id=?", (pid,))
-    conn.commit(); conn.close()
+    conn.commit()
+    conn.close()
     return redirect("/admin/products")
 
 @app.route("/admin/orders")
@@ -1018,7 +1048,7 @@ def admin_orders():
 def admin_order_detail(oid):
     conn = get_db()
     order = conn.execute("SELECT * FROM orders WHERE id=?", (oid,)).fetchone()
-    items = conn.execute("""SELECT oi.*,p.name FROM order_items oi 
+    items = conn.execute("""SELECT oi.*,p.name FROM order_items oi
         LEFT JOIN products p ON oi.product_id=p.id WHERE oi.order_id=?""", (oid,)).fetchall()
     conn.close()
     return render("admin_order_detail", order=order, items=items)
@@ -1029,7 +1059,8 @@ def admin_update_status(oid):
     status = request.form["status"]
     conn = get_db()
     conn.execute("UPDATE orders SET status=? WHERE id=?", (status, oid))
-    conn.commit(); conn.close()
+    conn.commit()
+    conn.close()
     return redirect(f"/admin/orders/{oid}")
 
 @app.route("/admin/categories")
@@ -1045,13 +1076,14 @@ def admin_categories():
 def admin_add_category():
     conn = get_db()
     conn.execute("INSERT INTO categories (name,icon) VALUES (?,?)", (request.form["name"], request.form["icon"]))
-    conn.commit(); conn.close()
+    conn.commit()
+    conn.close()
     return redirect("/admin/categories")
 
-# ─── التطبيق الرئيسي ──────────────────────────────────────────
 @app.route("/")
 def index():
     return render("app")
+
 
 if __name__ == "__main__":
     init_db()
