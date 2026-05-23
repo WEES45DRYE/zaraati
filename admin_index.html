@@ -1,0 +1,59 @@
+{% extends "admin_base.html" %}
+{% set page = "home" %}
+{% block content %}
+<div class="top-bar">
+  <h2>📊 لوحة التحكم</h2>
+  <span style="color:#888;font-size:13px">مرحباً، {{ session.admin }} 👋</span>
+</div>
+
+<div class="stat-cards">
+  <div class="stat-card">
+    <div class="stat-icon">📦</div>
+    <div class="stat-val">{{ stats.products }}</div>
+    <div class="stat-label">إجمالي المنتجات</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-icon">🛒</div>
+    <div class="stat-val">{{ stats.orders }}</div>
+    <div class="stat-label">إجمالي الطلبات</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-icon">🔔</div>
+    <div class="stat-val">{{ stats.new_orders }}</div>
+    <div class="stat-label">طلبات جديدة</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-icon">💰</div>
+    <div class="stat-val">{{ "%.0f"|format(stats.revenue) }} ج</div>
+    <div class="stat-label">إجمالي الإيرادات</div>
+  </div>
+</div>
+
+<div class="card">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+    <strong>آخر الطلبات</strong>
+    <a href="/admin/orders" style="color:var(--green);font-size:13px;text-decoration:none">عرض الكل ←</a>
+  </div>
+  <table>
+    <thead><tr>
+      <th>رقم الطلب</th><th>العميل</th><th>الهاتف</th>
+      <th>الإجمالي</th><th>الحالة</th><th>التاريخ</th><th>إجراء</th>
+    </tr></thead>
+    <tbody>
+    {% for o in orders %}
+    <tr>
+      <td><strong>#{{ o.id }}</strong></td>
+      <td>{{ o.customer_name }}</td>
+      <td>{{ o.customer_phone }}</td>
+      <td>{{ "%.2f"|format(o.total) }} ج</td>
+      <td><span class="badge badge-{{ o.status }}">{{ o.status }}</span></td>
+      <td style="font-size:12px;color:#888">{{ o.created_at[:16] }}</td>
+      <td><a href="/admin/orders/{{ o.id }}" class="btn btn-green btn-sm">عرض</a></td>
+    </tr>
+    {% else %}
+    <tr><td colspan="7" style="text-align:center;color:#888;padding:30px">لا توجد طلبات بعد</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

@@ -1,0 +1,122 @@
+{% extends "admin_base.html" %}
+{% set page = "products" %}
+{% block content %}
+<div class="top-bar">
+  <h2>📦 المنتجات</h2>
+  <button class="btn btn-green" onclick="document.getElementById('add-modal').classList.add('open')">+ إضافة منتج</button>
+</div>
+
+<table>
+  <thead><tr>
+    <th>#</th><th>الاسم</th><th>التصنيف</th>
+    <th>السعر</th><th>السعر القديم</th><th>المخزون</th><th>الوحدة</th><th>إجراءات</th>
+  </tr></thead>
+  <tbody>
+  {% for p in products %}
+  <tr>
+    <td>{{ p.id }}</td>
+    <td><strong>{{ p.name }}</strong></td>
+    <td>{{ p.cat_name }}</td>
+    <td>{{ p.price }} ج</td>
+    <td>{{ p.old_price or '—' }}</td>
+    <td>
+      <span style="color:{% if p.stock < 10 %}#f44336{% else %}#2e7d32{% endif %}">
+        {{ p.stock }}
+      </span>
+    </td>
+    <td>{{ p.unit }}</td>
+    <td style="display:flex;gap:6px">
+      <button class="btn btn-orange btn-sm" onclick="editProduct({{ p.id }},'{{ p.name }}','{{ p.description or '' }}',{{ p.price }},{{ p.old_price or 0 }},{{ p.stock }},{{ p.category_id }},'{{ p.unit }}')">تعديل</button>
+      <a href="/admin/products/delete/{{ p.id }}" class="btn btn-red btn-sm" onclick="return confirm('حذف المنتج؟')">حذف</a>
+    </td>
+  </tr>
+  {% else %}
+  <tr><td colspan="8" style="text-align:center;color:#888;padding:30px">لا توجد منتجات</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+
+<!-- Modal إضافة -->
+<div class="modal-overlay" id="add-modal">
+  <div class="modal-box">
+    <div class="modal-title">➕ إضافة منتج جديد</div>
+    <form method="POST" action="/admin/products/add">
+      <div class="form-row">
+        <div class="form-group"><label>اسم المنتج *</label><input name="name" required></div>
+        <div class="form-group"><label>التصنيف *</label>
+          <select name="category_id" required>
+            {% for c in categories %}<option value="{{ c.id }}">{{ c.name }}</option>{% endfor %}
+          </select>
+        </div>
+      </div>
+      <div class="form-group"><label>الوصف</label><input name="description"></div>
+      <div class="form-row">
+        <div class="form-group"><label>السعر (ج) *</label><input name="price" type="number" step="0.01" required></div>
+        <div class="form-group"><label>السعر القديم (اختياري)</label><input name="old_price" type="number" step="0.01"></div>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label>المخزون *</label><input name="stock" type="number" value="0" required></div>
+        <div class="form-group"><label>الوحدة</label>
+          <select name="unit">
+            <option>علبة</option><option>كيلو</option><option>لتر</option>
+            <option>جرام</option><option>قطعة</option>
+          </select>
+        </div>
+      </div>
+      <div style="display:flex;gap:10px">
+        <button type="submit" class="btn btn-green" style="flex:1">حفظ المنتج</button>
+        <button type="button" class="btn" style="flex:1;background:#eee;color:#333" onclick="document.getElementById('add-modal').classList.remove('open')">إلغاء</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Modal تعديل -->
+<div class="modal-overlay" id="edit-modal">
+  <div class="modal-box">
+    <div class="modal-title">✏️ تعديل المنتج</div>
+    <form method="POST" id="edit-form">
+      <div class="form-row">
+        <div class="form-group"><label>اسم المنتج</label><input name="name" id="e-name" required></div>
+        <div class="form-group"><label>التصنيف</label>
+          <select name="category_id" id="e-cat">
+            {% for c in categories %}<option value="{{ c.id }}">{{ c.name }}</option>{% endfor %}
+          </select>
+        </div>
+      </div>
+      <div class="form-group"><label>الوصف</label><input name="description" id="e-desc"></div>
+      <div class="form-row">
+        <div class="form-group"><label>السعر</label><input name="price" id="e-price" type="number" step="0.01"></div>
+        <div class="form-group"><label>السعر القديم</label><input name="old_price" id="e-oprice" type="number" step="0.01"></div>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label>المخزون</label><input name="stock" id="e-stock" type="number"></div>
+        <div class="form-group"><label>الوحدة</label>
+          <select name="unit" id="e-unit">
+            <option>علبة</option><option>كيلو</option><option>لتر</option>
+            <option>جرام</option><option>قطعة</option>
+          </select>
+        </div>
+      </div>
+      <div style="display:flex;gap:10px">
+        <button type="submit" class="btn btn-green" style="flex:1">حفظ التعديلات</button>
+        <button type="button" class="btn" style="flex:1;background:#eee;color:#333" onclick="document.getElementById('edit-modal').classList.remove('open')">إلغاء</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<script>
+function editProduct(id,name,desc,price,oprice,stock,catId,unit){
+  document.getElementById('edit-form').action='/admin/products/edit/'+id;
+  document.getElementById('e-name').value=name;
+  document.getElementById('e-desc').value=desc;
+  document.getElementById('e-price').value=price;
+  document.getElementById('e-oprice').value=oprice||'';
+  document.getElementById('e-stock').value=stock;
+  document.getElementById('e-cat').value=catId;
+  document.getElementById('e-unit').value=unit;
+  document.getElementById('edit-modal').classList.add('open');
+}
+</script>
+{% endblock %}

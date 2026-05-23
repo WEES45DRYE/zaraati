@@ -1,0 +1,58 @@
+{% extends "admin_base.html" %}
+{% set page = "orders" %}
+{% block content %}
+<div class="top-bar">
+  <h2>📋 تفاصيل الطلب #{{ order.id }}</h2>
+  <a href="/admin/orders">← الرجوع</a>
+</div>
+
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:18px">
+  <div class="card">
+    <strong style="font-size:15px">👤 بيانات العميل</strong>
+    <hr style="margin:12px 0">
+    <p><b>الاسم:</b> {{ order.customer_name }}</p>
+    <p style="margin-top:8px"><b>الهاتف:</b> {{ order.customer_phone }}</p>
+    <p style="margin-top:8px"><b>العنوان:</b> {{ order.customer_address }}</p>
+    <p style="margin-top:8px"><b>التاريخ:</b> {{ order.created_at[:16] }}</p>
+  </div>
+  <div class="card">
+    <strong style="font-size:15px">📊 حالة الطلب</strong>
+    <hr style="margin:12px 0">
+    <span class="badge badge-{{ order.status }}" style="font-size:14px;padding:6px 16px">{{ order.status }}</span>
+    <form method="POST" action="/admin/orders/status/{{ order.id }}" style="margin-top:16px">
+      <div class="form-group">
+        <label>تغيير الحالة</label>
+        <select name="status">
+          <option {% if order.status=='جديد' %}selected{% endif %}>جديد</option>
+          <option {% if order.status=='قيد التنفيذ' %}selected{% endif %}>قيد التنفيذ</option>
+          <option {% if order.status=='تم التوصيل' %}selected{% endif %}>تم التوصيل</option>
+          <option {% if order.status=='ملغي' %}selected{% endif %}>ملغي</option>
+        </select>
+      </div>
+      <button type="submit" class="btn btn-green">تحديث الحالة</button>
+    </form>
+  </div>
+</div>
+
+<div class="card">
+  <strong style="font-size:15px">🛒 المنتجات المطلوبة</strong>
+  <hr style="margin:12px 0">
+  <table>
+    <thead><tr><th>المنتج</th><th>الكمية</th><th>السعر</th><th>الإجمالي</th></tr></thead>
+    <tbody>
+    {% for item in items %}
+    <tr>
+      <td>{{ item.name }}</td>
+      <td>{{ item.qty }}</td>
+      <td>{{ item.price }} ج</td>
+      <td><strong>{{ "%.2f"|format(item.price * item.qty) }} ج</strong></td>
+    </tr>
+    {% endfor %}
+    <tr style="background:#f9fdf9">
+      <td colspan="3"><strong>الإجمالي</strong></td>
+      <td><strong style="color:var(--green);font-size:15px">{{ "%.2f"|format(order.total) }} ج</strong></td>
+    </tr>
+    </tbody>
+  </table>
+</div>
+{% endblock %}

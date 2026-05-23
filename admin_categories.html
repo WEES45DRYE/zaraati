@@ -1,0 +1,38 @@
+{% extends "admin_base.html" %}
+{% set page = "categories" %}
+{% block content %}
+<div class="top-bar">
+  <h2>🗂 التصنيفات</h2>
+  <button class="btn btn-green" onclick="document.getElementById('add-modal').classList.add('open')">+ إضافة تصنيف</button>
+</div>
+
+<table>
+  <thead><tr><th>#</th><th>الأيقونة</th><th>الاسم</th><th>عدد المنتجات</th></tr></thead>
+  <tbody>
+  {% for c in categories %}
+  <tr>
+    <td>{{ c.id }}</td>
+    <td style="font-size:24px">{{ c.icon }}</td>
+    <td><strong>{{ c.name }}</strong></td>
+    <td>{{ c.count }} منتج</td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table>
+
+<div class="modal-overlay" id="add-modal">
+  <div class="modal-box">
+    <div class="modal-title">➕ إضافة تصنيف</div>
+    <form method="POST" action="/admin/categories/add">
+      <div class="form-row">
+        <div class="form-group"><label>اسم التصنيف</label><input name="name" required></div>
+        <div class="form-group"><label>الأيقونة (emoji)</label><input name="icon" value="🌿" maxlength="5" style="font-size:20px"></div>
+      </div>
+      <div style="display:flex;gap:10px">
+        <button type="submit" class="btn btn-green" style="flex:1">إضافة</button>
+        <button type="button" class="btn" style="flex:1;background:#eee;color:#333" onclick="document.getElementById('add-modal').classList.remove('open')">إلغاء</button>
+      </div>
+    </form>
+  </div>
+</div>
+{% endblock %}
