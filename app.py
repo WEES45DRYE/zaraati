@@ -9,7 +9,7 @@ from psycopg2.extras import RealDictCursor
 app = Flask(__name__)
 app.secret_key = "zaraati_secret_2024"
 
-DATABASE_URL = os.environ.get("DATABASE_URL", "")
+DATABASE_URL = os.environ.get("DATABASE_URL", "").strip()
 
 UPLOAD_FOLDER = 'static/uploads'
 ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'webp', 'gif', 'svg'}
