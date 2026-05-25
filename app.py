@@ -1,26 +1,27 @@
+
 from flask import Flask, request, jsonify, redirect, session, make_response
 import sqlite3, os, re, base64
 from functools import wraps
 from jinja2 import Environment
 from werkzeug.utils import secure_filename
-
+ 
 app = Flask(__name__)
 app.secret_key = "zaraati_secret_2024"
 DB = "zaraati.db"
-
+ 
 UPLOAD_FOLDER = 'static/uploads'
 ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'webp', 'gif', 'svg'}
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
-
+ 
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
-
+ 
 def get_db():
     conn = sqlite3.connect(DB)
     conn.row_factory = sqlite3.Row
     return conn
-
+ 
 def get_setting(key, default=''):
     try:
         conn = get_db()
@@ -29,13 +30,13 @@ def get_setting(key, default=''):
         return row['value'] if row else default
     except:
         return default
-
+ 
 def set_setting(key, value):
     conn = get_db()
     conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES (?,?)", (key, value))
     conn.commit()
     conn.close()
-
+ 
 def init_db():
     conn = get_db()
     c = conn.cursor()
@@ -121,7 +122,7 @@ def init_db():
         c.execute("INSERT OR IGNORE INTO settings (key,value) VALUES ('site_name','الزراعة')")
     conn.commit()
     conn.close()
-
+ 
 def login_required(f):
     @wraps(f)
     def decorated(*args, **kwargs):
@@ -129,14 +130,14 @@ def login_required(f):
             return redirect("/admin/login")
         return f(*args, **kwargs)
     return decorated
-
+ 
 jinja_env = Environment()
-
+ 
 def render(tmpl_str, **ctx):
     ctx['session'] = session
     t = jinja_env.from_string(tmpl_str)
     return make_response(t.render(**ctx))
-
+ 
 # ══════════════════════════════════════════════════════════════
 # STATIC UPLOADS
 # ══════════════════════════════════════════════════════════════
@@ -144,7 +145,7 @@ def render(tmpl_str, **ctx):
 def uploaded_file(filename):
     from flask import send_from_directory
     return send_from_directory(app.config['UPLOAD_FOLDER'], filename)
-
+ 
 # ══════════════════════════════════════════════════════════════
 # API
 # ══════════════════════════════════════════════════════════════
@@ -154,7 +155,7 @@ def api_categories():
     cats = conn.execute("SELECT * FROM categories ORDER BY id").fetchall()
     conn.close()
     return jsonify([dict(r) for r in cats])
-
+ 
 @app.route("/api/products")
 def api_products():
     cat = request.args.get("category")
@@ -171,14 +172,14 @@ def api_products():
     rows = conn.execute(q, params).fetchall()
     conn.close()
     return jsonify([dict(r) for r in rows])
-
+ 
 @app.route("/api/products/featured")
 def api_featured():
     conn = get_db()
     rows = conn.execute("SELECT p.*,c.name as cat_name FROM products p LEFT JOIN categories c ON p.category_id=c.id WHERE p.featured=1 LIMIT 8").fetchall()
     conn.close()
     return jsonify([dict(r) for r in rows])
-
+ 
 @app.route("/api/orders", methods=["POST"])
 def api_place_order():
     data = request.json
@@ -196,7 +197,7 @@ def api_place_order():
     except: pass
     conn.commit(); conn.close()
     return jsonify({"success": True, "order_id": oid})
-
+ 
 # ══════════════════════════════════════════════════════════════
 # ADMIN
 # ══════════════════════════════════════════════════════════════
@@ -213,12 +214,12 @@ def admin_login():
             return redirect("/admin")
         error = "اسم المستخدم أو كلمة المرور غلط"
     return render(TMPL_LOGIN, error=error)
-
+ 
 @app.route("/admin/logout")
 def admin_logout():
     session.pop("admin", None)
     return redirect("/admin/login")
-
+ 
 @app.route("/admin")
 @login_required
 def admin_index():
@@ -233,7 +234,7 @@ def admin_index():
     recent_orders = conn.execute("SELECT * FROM orders ORDER BY created_at DESC LIMIT 7").fetchall()
     conn.close()
     return render(TMPL_ADMIN_INDEX, stats=stats, orders=recent_orders)
-
+ 
 @app.route("/admin/products")
 @login_required
 def admin_products():
@@ -242,7 +243,7 @@ def admin_products():
     categories = conn.execute("SELECT * FROM categories ORDER BY id").fetchall()
     conn.close()
     return render(TMPL_ADMIN_PRODUCTS, products=products, categories=categories)
-
+ 
 @app.route("/admin/products/add", methods=["POST"])
 @login_required
 def admin_add_product():
@@ -262,7 +263,7 @@ def admin_add_product():
          1 if f.get("featured") else 0, image_url))
     conn.commit(); conn.close()
     return redirect("/admin/products")
-
+ 
 @app.route("/admin/products/edit/<int:pid>", methods=["POST"])
 @login_required
 def admin_edit_product(pid):
@@ -289,7 +290,7 @@ def admin_edit_product(pid):
              1 if f.get("featured") else 0, pid))
     conn.commit(); conn.close()
     return redirect("/admin/products")
-
+ 
 @app.route("/admin/products/delete/<int:pid>")
 @login_required
 def admin_delete_product(pid):
@@ -297,7 +298,7 @@ def admin_delete_product(pid):
     conn.execute("DELETE FROM products WHERE id=?", (pid,))
     conn.commit(); conn.close()
     return redirect("/admin/products")
-
+ 
 @app.route("/admin/categories")
 @login_required
 def admin_categories():
@@ -305,7 +306,7 @@ def admin_categories():
     cats = conn.execute("SELECT c.*,(SELECT COUNT(*) FROM products WHERE category_id=c.id) as count FROM categories c ORDER BY c.id").fetchall()
     conn.close()
     return render(TMPL_ADMIN_CATS, categories=cats)
-
+ 
 @app.route("/admin/categories/add", methods=["POST"])
 @login_required
 def admin_add_category():
@@ -314,7 +315,7 @@ def admin_add_category():
         (request.form["name"], request.form["icon"], request.form.get("type","main")))
     conn.commit(); conn.close()
     return redirect("/admin/categories")
-
+ 
 @app.route("/admin/categories/edit/<int:cid>", methods=["POST"])
 @login_required
 def admin_edit_category(cid):
@@ -324,7 +325,7 @@ def admin_edit_category(cid):
         (f["name"], f["icon"], f.get("type","main"), cid))
     conn.commit(); conn.close()
     return redirect("/admin/categories")
-
+ 
 @app.route("/admin/categories/delete/<int:cid>")
 @login_required
 def admin_delete_category(cid):
@@ -333,7 +334,7 @@ def admin_delete_category(cid):
     conn.execute("DELETE FROM categories WHERE id=?", (cid,))
     conn.commit(); conn.close()
     return redirect("/admin/categories")
-
+ 
 @app.route("/admin/orders")
 @login_required
 def admin_orders():
@@ -341,7 +342,7 @@ def admin_orders():
     orders = conn.execute("SELECT * FROM orders ORDER BY created_at DESC").fetchall()
     conn.close()
     return render(TMPL_ADMIN_ORDERS, orders=orders)
-
+ 
 @app.route("/admin/orders/<int:oid>")
 @login_required
 def admin_order_detail(oid):
@@ -350,7 +351,7 @@ def admin_order_detail(oid):
     items = conn.execute("SELECT oi.*,p.name FROM order_items oi LEFT JOIN products p ON oi.product_id=p.id WHERE oi.order_id=?", (oid,)).fetchall()
     conn.close()
     return render(TMPL_ADMIN_ORDER_DETAIL, order=order, items=items)
-
+ 
 @app.route("/admin/orders/status/<int:oid>", methods=["POST"])
 @login_required
 def admin_update_status(oid):
@@ -358,7 +359,7 @@ def admin_update_status(oid):
     conn.execute("UPDATE orders SET status=? WHERE id=?", (request.form["status"], oid))
     conn.commit(); conn.close()
     return redirect(f"/admin/orders/{oid}")
-
+ 
 @app.route("/admin/customers")
 @login_required
 def admin_customers():
@@ -366,7 +367,7 @@ def admin_customers():
     customers = conn.execute("SELECT * FROM customers ORDER BY created_at DESC").fetchall()
     conn.close()
     return render(TMPL_ADMIN_CUSTOMERS, customers=customers)
-
+ 
 # ── إعدادات الموقع ──────────────────────────────────────────
 @app.route("/admin/settings")
 @login_required
@@ -379,30 +380,30 @@ def admin_settings():
         'site_name': get_setting('site_name', 'الزراعة'),
     }
     return render(TMPL_ADMIN_SETTINGS, settings=settings)
-
+ 
 @app.route("/admin/settings/save", methods=["POST"])
 @login_required
 def admin_settings_save():
     f = request.form
-
+ 
     # Site name
     if f.get('site_name'):
         set_setting('site_name', f['site_name'])
-
+ 
     # Logo
     logo_type = f.get('logo_type', 'emoji')
     set_setting('logo_type', logo_type)
-
+ 
     if logo_type == 'emoji' and f.get('logo_emoji'):
         set_setting('logo_emoji', f['logo_emoji'])
-
+ 
     if logo_type == 'image' and 'logo_image' in request.files:
         file = request.files['logo_image']
         if file and file.filename and allowed_file(file.filename):
             filename = 'logo_' + secure_filename(file.filename)
             file.save(os.path.join(app.config['UPLOAD_FOLDER'], filename))
             set_setting('logo_image', f'/static/uploads/{filename}')
-
+ 
     # Banner image
     if 'banner_image' in request.files:
         file = request.files['banner_image']
@@ -410,16 +411,16 @@ def admin_settings_save():
             filename = 'banner_' + secure_filename(file.filename)
             file.save(os.path.join(app.config['UPLOAD_FOLDER'], filename))
             set_setting('banner_image', f'/static/uploads/{filename}')
-
+ 
     if f.get('remove_banner'):
         set_setting('banner_image', '')
-
+ 
     if f.get('remove_logo_image'):
         set_setting('logo_image', '')
         set_setting('logo_type', 'emoji')
-
+ 
     return redirect("/admin/settings")
-
+ 
 @app.route("/")
 def index():
     settings = {
@@ -430,12 +431,12 @@ def index():
         'site_name': get_setting('site_name', 'الزراعة'),
     }
     return render(TMPL_APP, **settings)
-
-
+ 
+ 
 # ══════════════════════════════════════════════════════════════
 # TEMPLATES
 # ══════════════════════════════════════════════════════════════
-
+ 
 TMPL_APP = """<!DOCTYPE html>
 <html lang="ar" dir="rtl">
 <head>
@@ -498,11 +499,9 @@ body{font-family:'Cairo',sans-serif;background:var(--bg);color:var(--text)}
 .banner-tags{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:16px}
 .banner-tag{background:rgba(255,255,255,.2);padding:3px 10px;border-radius:20px;font-size:11px}
 .banner-btn{background:#fff;color:var(--green);border:none;padding:10px 24px;border-radius:25px;font-weight:700;font-size:14px;cursor:pointer;font-family:'Cairo',sans-serif}
-/* صورة البانر */
-.banner-image-side{width:160px;flex-shrink:0;display:flex;align-items:center;justify-content:center;position:relative;z-index:1}
-.banner-image-side img{width:150px;height:150px;object-fit:contain;filter:drop-shadow(0 8px 24px rgba(0,0,0,.3));animation:floatImg 3s ease-in-out infinite}
-@keyframes floatImg{0%,100%{transform:translateY(0)}50%{transform:translateY(-8px)}}
-.banner-emoji-side{font-size:100px;opacity:.15;position:absolute;left:-10px;top:50%;transform:translateY(-50%)}
+/* صورة البانر - تغطي كل البانر كـ background */
+.banner-bg-img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;opacity:.35;z-index:0}
+.banner-emoji-side{font-size:100px;opacity:.15;position:absolute;left:-10px;top:50%;transform:translateY(-50%);z-index:0}
 /* ── Sections ── */
 .section{padding:16px}
 .sec-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:14px}
@@ -584,7 +583,7 @@ body{font-family:'Cairo',sans-serif;background:var(--bg);color:var(--text)}
 </style>
 </head>
 <body>
-
+ 
 <!-- Header -->
 <div class="header">
   <div class="header-top">
@@ -624,7 +623,7 @@ body{font-family:'Cairo',sans-serif;background:var(--bg);color:var(--text)}
     <a href="#" class="active" onclick="filterCat(0,this)">الرئيسية</a>
   </nav>
 </div>
-
+ 
 <!-- Pages -->
 <div class="page active" id="page-home">
   <!-- Banner -->
@@ -640,14 +639,12 @@ body{font-family:'Cairo',sans-serif;background:var(--bg);color:var(--text)}
       <button class="banner-btn" onclick="filterCat(0)">تسوق الآن</button>
     </div>
     {% if banner_image %}
-    <div class="banner-image-side">
-      <img src="{{ banner_image }}" alt="banner">
-    </div>
+    <img class="banner-bg-img" src="{{ banner_image }}" alt="banner">
     {% else %}
     <div class="banner-emoji-side">🌾</div>
     {% endif %}
   </div>
-
+ 
   <!-- Categories -->
   <div class="section">
     <div class="sec-header">
@@ -655,7 +652,7 @@ body{font-family:'Cairo',sans-serif;background:var(--bg);color:var(--text)}
     </div>
     <div class="cats-scroll" id="cats-list"><div class="spinner"></div></div>
   </div>
-
+ 
   <!-- Features -->
   <div class="features">
     <div class="feat-item"><div class="feat-icon">🔍</div><div><div class="feat-title">بحث متقدم</div><div class="feat-sub">بحث برقم التسجيل أو اسم المنتج</div></div></div>
@@ -663,7 +660,7 @@ body{font-family:'Cairo',sans-serif;background:var(--bg);color:var(--text)}
     <div class="feat-item"><div class="feat-icon">✅</div><div><div class="feat-title">منتجات أصلية</div><div class="feat-sub">جميع المنتجات من شركات موثقة</div></div></div>
     <div class="feat-item"><div class="feat-icon">💬</div><div><div class="feat-title">دعم فني</div><div class="feat-sub">استشارة زراعية قبل وبعد الشراء</div></div></div>
   </div>
-
+ 
   <!-- Products -->
   <div class="section">
     <div class="sec-header">
@@ -673,20 +670,20 @@ body{font-family:'Cairo',sans-serif;background:var(--bg);color:var(--text)}
     <div class="products-grid" id="products-grid"><div class="spinner"></div></div>
   </div>
 </div>
-
+ 
 <!-- Cart Page -->
 <div class="page" id="page-cart">
   <div style="padding:16px 16px 8px;font-size:16px;font-weight:700">🛒 سلة المشتريات</div>
   <div id="cart-list"></div>
   <div id="cart-total-box"></div>
 </div>
-
+ 
 <!-- Orders Page -->
 <div class="page" id="page-orders">
   <div style="padding:16px 16px 8px;font-size:16px;font-weight:700">📦 طلباتي</div>
   <div class="empty-state"><div class="empty-icon">📦</div><div>طلباتك ستظهر هنا بعد الشراء</div></div>
 </div>
-
+ 
 <!-- Profile Page -->
 <div class="page" id="page-profile">
   <div style="background:linear-gradient(135deg,var(--green),#388e3c);color:#fff;padding:30px 20px;text-align:center;margin-bottom:16px">
@@ -703,7 +700,7 @@ body{font-family:'Cairo',sans-serif;background:var(--bg);color:var(--text)}
     </div>
   </div>
 </div>
-
+ 
 <!-- Order Modal -->
 <div class="overlay" id="order-overlay">
   <div class="modal">
@@ -716,7 +713,7 @@ body{font-family:'Cairo',sans-serif;background:var(--bg);color:var(--text)}
     <button class="cancel-btn" onclick="closeModal()">إلغاء</button>
   </div>
 </div>
-
+ 
 <!-- Bottom Nav -->
 <div class="bottom-nav">
   <button class="bnav-btn active" onclick="showPage('home')"><span>🏠</span>الرئيسية</button>
@@ -724,14 +721,14 @@ body{font-family:'Cairo',sans-serif;background:var(--bg);color:var(--text)}
   <button class="bnav-btn" onclick="showPage('orders')"><span>📦</span>طلباتي</button>
   <button class="bnav-btn" onclick="showPage('profile')"><span>👤</span>حسابي</button>
 </div>
-
+ 
 <div class="toast" id="toast"></div>
-
+ 
 <script>
 const EMOJIS={1:'🦟',2:'🌱',3:'💊',4:'🏷️',null:'🌿'};
 let cart=JSON.parse(localStorage.getItem('cart')||'[]');
 let allProducts=[];
-
+ 
 function showPage(n){
   document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
   document.querySelectorAll('.bnav-btn').forEach(b=>b.classList.remove('active'));
@@ -740,20 +737,20 @@ function showPage(n){
   document.querySelectorAll('.bnav-btn')[idx]?.classList.add('active');
   if(n==='cart') renderCart();
 }
-
+ 
 function toast(msg){
   const t=document.getElementById('toast');
   t.textContent=msg;t.classList.add('show');
   setTimeout(()=>t.classList.remove('show'),2200);
 }
-
+ 
 function updateCartCount(){
   const n=cart.reduce((s,i)=>s+i.qty,0);
   document.getElementById('cart-count').textContent=n;
   const b=document.getElementById('cart-badge');
   if(n>0){b.style.display='flex';b.textContent=n;}else{b.style.display='none';}
 }
-
+ 
 async function loadCategories(){
   const res=await fetch('/api/categories');
   const cats=await res.json();
@@ -768,13 +765,13 @@ async function loadCategories(){
     list.innerHTML+=`<div class="cat-card" onclick="filterCat(${c.id},this)"><div class="cat-icon">${c.icon}</div><div class="cat-name">${c.name}</div></div>`;
   });
 }
-
+ 
 async function loadProducts(){
   const res=await fetch('/api/products/featured');
   allProducts=await res.json();
   renderProducts(allProducts,'منتجات مميزة');
 }
-
+ 
 async function filterCat(id,el){
   document.querySelectorAll('.cat-card').forEach(c=>c.classList.remove('active'));
   document.querySelectorAll('.nav a').forEach(a=>a.classList.remove('active'));
@@ -787,7 +784,7 @@ async function filterCat(id,el){
   const catName=id?(document.querySelector(`.cat-card.active .cat-name`)?.textContent||'المنتجات'):'جميع المنتجات';
   renderProducts(prods,catName);
 }
-
+ 
 function toggleMobileSearch(){
   const bar=document.getElementById('mobile-search-bar');
   bar.classList.toggle('open');
@@ -798,14 +795,14 @@ function toggleMobileSearch(){
     loadProducts();
   }
 }
-
+ 
 async function searchProducts(q){
   if(!q){loadProducts();return;}
   const res=await fetch(`/api/products?search=${encodeURIComponent(q)}`);
   const prods=await res.json();
   renderProducts(prods,`نتائج البحث: "${q}"`);
 }
-
+ 
 function renderProducts(products,title){
   document.getElementById('products-title').textContent=title||'المنتجات';
   const g=document.getElementById('products-grid');
@@ -830,7 +827,7 @@ function renderProducts(products,title){
       </div>
     </div>`).join('');
 }
-
+ 
 function addToCart(id,name,price,unit,catId,imageUrl){
   const ex=cart.find(i=>i.id==id);
   if(ex){ex.qty++;}else{cart.push({id,name,price,unit,catId,imageUrl,qty:1});}
@@ -838,7 +835,7 @@ function addToCart(id,name,price,unit,catId,imageUrl){
   updateCartCount();
   toast('✅ تم إضافة '+name+' للسلة');
 }
-
+ 
 function renderCart(){
   const el=document.getElementById('cart-list');
   const tot=document.getElementById('cart-total-box');
@@ -871,7 +868,7 @@ function renderCart(){
       <button class="checkout-btn" onclick="openModal()">إتمام الطلب ←</button>
     </div>`;
 }
-
+ 
 function changeQty(id,d){
   const i=cart.find(x=>x.id==id);
   if(!i)return;
@@ -880,13 +877,13 @@ function changeQty(id,d){
   localStorage.setItem('cart',JSON.stringify(cart));
   updateCartCount();renderCart();
 }
-
+ 
 function removeItem(id){
   cart=cart.filter(x=>x.id!=id);
   localStorage.setItem('cart',JSON.stringify(cart));
   updateCartCount();renderCart();
 }
-
+ 
 function openModal(){
   if(!cart.length){toast('السلة فارغة!');return;}
   const sub=cart.reduce((s,i)=>s+i.price*i.qty,0);
@@ -895,9 +892,9 @@ function openModal(){
     `<hr style="margin:8px 0"><strong>الإجمالي: ${(sub+20).toFixed(2)} ج.م</strong>`;
   document.getElementById('order-overlay').classList.add('open');
 }
-
+ 
 function closeModal(){document.getElementById('order-overlay').classList.remove('open');}
-
+ 
 async function submitOrder(){
   const name=document.getElementById('f-name').value.trim();
   const phone=document.getElementById('f-phone').value.trim();
@@ -918,15 +915,15 @@ async function submitOrder(){
   }catch(e){toast('خطأ في الاتصال');}
   btn.disabled=false;btn.textContent='تأكيد الطلب';
 }
-
+ 
 updateCartCount();
 loadCategories();
 loadProducts();
 </script>
 </body>
 </html>"""
-
-
+ 
+ 
 TMPL_LOGIN = """<!DOCTYPE html>
 <html lang="ar" dir="rtl">
 <head>
@@ -962,7 +959,7 @@ input:focus{border-color:#4caf50}
 </div>
 </body>
 </html>"""
-
+ 
 ADMIN_BASE_STYLE = """
 <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;900&display=swap" rel="stylesheet">
 <style>
@@ -1024,7 +1021,7 @@ tr:hover td{background:#f9fdf9}
 .prod-thumb{width:46px;height:46px;border-radius:8px;object-fit:contain;border:1px solid #eee;background:#f9f9f9;padding:3px}
 </style>
 """
-
+ 
 TMPL_ADMIN_INDEX = """<!DOCTYPE html>
 <html lang="ar" dir="rtl">
 <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>لوحة التحكم - الزراعة</title>""" + ADMIN_BASE_STYLE + """</head>
@@ -1066,7 +1063,7 @@ TMPL_ADMIN_INDEX = """<!DOCTYPE html>
   </div>
 </div>
 </body></html>"""
-
+ 
 TMPL_ADMIN_SETTINGS = """<!DOCTYPE html>
 <html lang="ar" dir="rtl">
 <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>إعدادات الموقع - الزراعة</title>""" + ADMIN_BASE_STYLE + """</head>
@@ -1086,9 +1083,9 @@ TMPL_ADMIN_SETTINGS = """<!DOCTYPE html>
 </div>
 <div class="main">
   <div class="topbar"><h2>⚙️ إعدادات الموقع</h2><a href="/" target="_blank" class="btn btn-green">معاينة المتجر ←</a></div>
-
+ 
   <form method="POST" action="/admin/settings/save" enctype="multipart/form-data">
-
+ 
     <!-- اسم الموقع -->
     <div class="card">
       <div class="card-title">🏪 اسم الموقع</div>
@@ -1097,12 +1094,12 @@ TMPL_ADMIN_SETTINGS = """<!DOCTYPE html>
         <input name="site_name" value="{{ settings.site_name }}" placeholder="الزراعة">
       </div>
     </div>
-
+ 
     <!-- اللوجو -->
     <div class="card">
       <div class="card-title">🖼️ أيقونة / لوجو الموقع</div>
       <p style="font-size:12px;color:#888;margin-bottom:14px">اختار إما إيموجي أو صورة تظهر في ركن الهيدر</p>
-
+ 
       <div class="fg">
         <label>نوع الأيقونة</label>
         <select name="logo_type" id="logo-type-sel" onchange="toggleLogoType(this.value)">
@@ -1110,7 +1107,7 @@ TMPL_ADMIN_SETTINGS = """<!DOCTYPE html>
           <option value="image" {% if settings.logo_type == 'image' %}selected{% endif %}>صورة مرفوعة</option>
         </select>
       </div>
-
+ 
       <!-- Emoji option -->
       <div id="logo-emoji-box" style="{% if settings.logo_type == 'image' %}display:none{% endif %}">
         <div class="fg">
@@ -1119,7 +1116,7 @@ TMPL_ADMIN_SETTINGS = """<!DOCTYPE html>
         </div>
         <div style="font-size:13px;color:#888">مثال: 🌿 🌱 🌾 🌻 🍃 🌲</div>
       </div>
-
+ 
       <!-- Image option -->
       <div id="logo-image-box" style="{% if settings.logo_type == 'emoji' %}display:none{% endif %}">
         {% if settings.logo_image %}
@@ -1148,12 +1145,12 @@ TMPL_ADMIN_SETTINGS = """<!DOCTYPE html>
         </div>
       </div>
     </div>
-
+ 
     <!-- صورة البانر -->
     <div class="card">
       <div class="card-title">🎨 صورة البانر الرئيسي</div>
       <p style="font-size:12px;color:#888;margin-bottom:14px">الصورة تظهر على يمين نص "كل ما يحتاجه المزارع لمحصول أفضل" — يفضل صورة بخلفية شفافة (PNG)</p>
-
+ 
       {% if settings.banner_image %}
       <div style="margin-bottom:14px;padding:14px;background:#f1f8e9;border-radius:10px;display:flex;align-items:center;gap:14px">
         <img src="{{ settings.banner_image }}" style="width:100px;height:80px;object-fit:contain;border-radius:8px;border:1px solid #e0e0e0;background:linear-gradient(135deg,#1a5c2a,#388e3c);padding:6px">
@@ -1165,7 +1162,7 @@ TMPL_ADMIN_SETTINGS = """<!DOCTYPE html>
         </div>
       </div>
       {% endif %}
-
+ 
       <div class="fg">
         <label>رفع صورة بانر جديدة</label>
         <div class="upload-zone" id="banner-zone">
@@ -1180,17 +1177,17 @@ TMPL_ADMIN_SETTINGS = """<!DOCTYPE html>
         </div>
       </div>
     </div>
-
+ 
     <button type="submit" class="btn btn-green" style="padding:13px 40px;font-size:15px">💾 حفظ الإعدادات</button>
   </form>
 </div>
-
+ 
 <script>
 function toggleLogoType(v){
   document.getElementById('logo-emoji-box').style.display = v==='emoji' ? '' : 'none';
   document.getElementById('logo-image-box').style.display = v==='image' ? '' : 'none';
 }
-
+ 
 function previewUpload(input, zoneId, prevId){
   if(!input.files || !input.files[0]) return;
   const reader = new FileReader();
@@ -1202,7 +1199,7 @@ function previewUpload(input, zoneId, prevId){
   };
   reader.readAsDataURL(input.files[0]);
 }
-
+ 
 function removePreview(zoneId, prevId){
   const zone = document.getElementById(zoneId);
   const prev = document.getElementById(prevId);
@@ -1212,7 +1209,7 @@ function removePreview(zoneId, prevId){
 }
 </script>
 </body></html>"""
-
+ 
 TMPL_ADMIN_CATS = """<!DOCTYPE html>
 <html lang="ar" dir="rtl">
 <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>التصنيفات - الزراعة</title>""" + ADMIN_BASE_STYLE + """</head>
@@ -1297,7 +1294,7 @@ function editCat(id,name,icon,type){
 }
 </script>
 </body></html>"""
-
+ 
 TMPL_ADMIN_PRODUCTS = """<!DOCTYPE html>
 <html lang="ar" dir="rtl">
 <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>المنتجات - الزراعة</title>""" + ADMIN_BASE_STYLE + """</head>
@@ -1346,7 +1343,7 @@ TMPL_ADMIN_PRODUCTS = """<!DOCTYPE html>
   </tbody></table>
   </div>
 </div>
-
+ 
 <!-- Add Modal -->
 <div class="overlay" id="add-m">
   <div class="modal">
@@ -1386,7 +1383,7 @@ TMPL_ADMIN_PRODUCTS = """<!DOCTYPE html>
     </form>
   </div>
 </div>
-
+ 
 <!-- Edit Modal -->
 <div class="overlay" id="edit-m">
   <div class="modal">
@@ -1429,7 +1426,7 @@ TMPL_ADMIN_PRODUCTS = """<!DOCTYPE html>
     </form>
   </div>
 </div>
-
+ 
 <script>
 function previewUpload(input, zoneId, prevId){
   if(!input.files || !input.files[0]) return;
@@ -1442,7 +1439,7 @@ function previewUpload(input, zoneId, prevId){
   };
   reader.readAsDataURL(input.files[0]);
 }
-
+ 
 function removePreview(zoneId, prevId){
   const zone = document.getElementById(zoneId);
   const prev = document.getElementById(prevId);
@@ -1450,7 +1447,7 @@ function removePreview(zoneId, prevId){
   zone.classList.remove('has-img');
   zone.querySelector('input[type=file]').value = '';
 }
-
+ 
 function editProd(id,name,desc,price,oprice,stock,catId,unit,featured,imageUrl){
   document.getElementById('edit-form').action='/admin/products/edit/'+id;
   document.getElementById('e-name').value=name;
@@ -1472,7 +1469,7 @@ function editProd(id,name,desc,price,oprice,stock,catId,unit,featured,imageUrl){
 }
 </script>
 </body></html>"""
-
+ 
 TMPL_ADMIN_ORDERS = """<!DOCTYPE html>
 <html lang="ar" dir="rtl">
 <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>الطلبات - الزراعة</title>""" + ADMIN_BASE_STYLE + """</head>
@@ -1509,7 +1506,7 @@ TMPL_ADMIN_ORDERS = """<!DOCTYPE html>
   </div>
 </div>
 </body></html>"""
-
+ 
 TMPL_ADMIN_ORDER_DETAIL = """<!DOCTYPE html>
 <html lang="ar" dir="rtl">
 <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>تفاصيل الطلب - الزراعة</title>""" + ADMIN_BASE_STYLE + """</head>
@@ -1565,7 +1562,7 @@ TMPL_ADMIN_ORDER_DETAIL = """<!DOCTYPE html>
   </div>
 </div>
 </body></html>"""
-
+ 
 TMPL_ADMIN_CUSTOMERS = """<!DOCTYPE html>
 <html lang="ar" dir="rtl">
 <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>العملاء - الزراعة</title>""" + ADMIN_BASE_STYLE + """</head>
@@ -1595,7 +1592,7 @@ TMPL_ADMIN_CUSTOMERS = """<!DOCTYPE html>
   </div>
 </div>
 </body></html>"""
-
+ 
 if __name__ == "__main__":
     init_db()
     app.run(debug=True, port=5000)
