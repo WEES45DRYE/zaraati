@@ -1,58 +1,66 @@
-
 from flask import Flask, request, jsonify, redirect, session, make_response
-import sqlite3, os, re, base64
+import os, re, base64
 from functools import wraps
 from jinja2 import Environment
 from werkzeug.utils import secure_filename
- 
+import psycopg2
+from psycopg2.extras import RealDictCursor
+
 app = Flask(__name__)
 app.secret_key = "zaraati_secret_2024"
-DB = "zaraati.db"
- 
+
+DATABASE_URL = os.environ.get("DATABASE_URL", "")
+
 UPLOAD_FOLDER = 'static/uploads'
 ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'webp', 'gif', 'svg'}
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
- 
+
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
- 
+
 def get_db():
-    conn = sqlite3.connect(DB)
-    conn.row_factory = sqlite3.Row
+    conn = psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
     return conn
- 
+
 def get_setting(key, default=''):
     try:
         conn = get_db()
-        row = conn.execute("SELECT value FROM settings WHERE key=?", (key,)).fetchone()
-        conn.close()
+        cur = conn.cursor()
+        cur.execute("SELECT value FROM settings WHERE key=%s", (key,))
+        row = cur.fetchone()
+        cur.close(); conn.close()
         return row['value'] if row else default
     except:
         return default
- 
+
 def set_setting(key, value):
     conn = get_db()
-    conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES (?,?)", (key, value))
-    conn.commit()
-    conn.close()
- 
+    cur = conn.cursor()
+    cur.execute("INSERT INTO settings (key, value) VALUES (%s, %s) ON CONFLICT (key) DO UPDATE SET value=%s",
+                (key, value, value))
+    conn.commit(); cur.close(); conn.close()
+
 def init_db():
     conn = get_db()
-    c = conn.cursor()
-    c.executescript("""
+    cur = conn.cursor()
+    cur.execute("""
         CREATE TABLE IF NOT EXISTS settings (
             key TEXT PRIMARY KEY,
             value TEXT
-        );
+        )
+    """)
+    cur.execute("""
         CREATE TABLE IF NOT EXISTS categories (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id SERIAL PRIMARY KEY,
             name TEXT NOT NULL,
             icon TEXT DEFAULT '🌿',
             type TEXT DEFAULT 'main'
-        );
+        )
+    """)
+    cur.execute("""
         CREATE TABLE IF NOT EXISTS products (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id SERIAL PRIMARY KEY,
             name TEXT NOT NULL,
             description TEXT,
             price REAL NOT NULL,
@@ -61,49 +69,56 @@ def init_db():
             category_id INTEGER,
             image_url TEXT DEFAULT '',
             unit TEXT DEFAULT 'علبة',
-            featured INTEGER DEFAULT 0,
-            FOREIGN KEY (category_id) REFERENCES categories(id)
-        );
+            featured INTEGER DEFAULT 0
+        )
+    """)
+    cur.execute("""
         CREATE TABLE IF NOT EXISTS orders (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id SERIAL PRIMARY KEY,
             customer_name TEXT,
             customer_phone TEXT,
             customer_address TEXT,
             total REAL,
             status TEXT DEFAULT 'جديد',
-            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-        );
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    cur.execute("""
         CREATE TABLE IF NOT EXISTS order_items (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id SERIAL PRIMARY KEY,
             order_id INTEGER,
             product_id INTEGER,
             qty INTEGER,
-            price REAL,
-            FOREIGN KEY (order_id) REFERENCES orders(id),
-            FOREIGN KEY (product_id) REFERENCES products(id)
-        );
+            price REAL
+        )
+    """)
+    cur.execute("""
         CREATE TABLE IF NOT EXISTS admins (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id SERIAL PRIMARY KEY,
             username TEXT UNIQUE,
             password TEXT
-        );
+        )
+    """)
+    cur.execute("""
         CREATE TABLE IF NOT EXISTS customers (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id SERIAL PRIMARY KEY,
             name TEXT,
             phone TEXT UNIQUE,
             address TEXT,
-            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-        );
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
     """)
-    existing = c.execute("SELECT COUNT(*) FROM categories").fetchone()[0]
-    if existing == 0:
-        c.executemany("INSERT INTO categories (name, icon, type) VALUES (?,?,?)", [
-            ("المبيدات","🦟","main"),
-            ("الأسمدة","🌱","main"),
-            ("الأدوية الزراعية","💊","main"),
-            ("العروض","🏷️","promo"),
-        ])
-        c.executemany("""INSERT INTO products (name,description,price,old_price,stock,category_id,unit,featured) VALUES (?,?,?,?,?,?,?,?)""", [
+
+    # Seed data only if empty
+    cur.execute("SELECT COUNT(*) FROM categories")
+    count = cur.fetchone()['count']
+    if count == 0:
+        cur.execute("INSERT INTO categories (name,icon,type) VALUES (%s,%s,%s)", ("المبيدات","🦟","main"))
+        cur.execute("INSERT INTO categories (name,icon,type) VALUES (%s,%s,%s)", ("الأسمدة","🌱","main"))
+        cur.execute("INSERT INTO categories (name,icon,type) VALUES (%s,%s,%s)", ("الأدوية الزراعية","💊","main"))
+        cur.execute("INSERT INTO categories (name,icon,type) VALUES (%s,%s,%s)", ("العروض","🏷️","promo"))
+
+        products = [
             ("إيميداكلوبريد SC 5%","مبيد حشري فعال ضد الآفات الماصة",450,500,50,1,"لتر",1),
             ("جليفوسات SL 48%","مبيد أعشاب غير انتقائي",320,None,30,1,"لتر",1),
             ("ريفوسول WP 72%","مبيد فطري واسع الطيف",280,320,40,1,"كيلو",1),
@@ -112,17 +127,22 @@ def init_db():
             ("سوبر فوسفات","سماد فوسفاتي متكامل",150,None,55,2,"كيلو",0),
             ("ريدوميل جولد","مبيد فطري للتربة والنبات",350,400,25,3,"كيلو",1),
             ("فيتافاكس","معالجة بذور ضد الأمراض",190,None,30,3,"كيلو",0),
-        ])
-        c.execute("INSERT OR IGNORE INTO admins (username, password) VALUES ('admin','admin123')")
-        # Default settings
-        c.execute("INSERT OR IGNORE INTO settings (key,value) VALUES ('logo_type','emoji')")
-        c.execute("INSERT OR IGNORE INTO settings (key,value) VALUES ('logo_emoji','🌿')")
-        c.execute("INSERT OR IGNORE INTO settings (key,value) VALUES ('logo_image','')")
-        c.execute("INSERT OR IGNORE INTO settings (key,value) VALUES ('banner_image','')")
-        c.execute("INSERT OR IGNORE INTO settings (key,value) VALUES ('site_name','الزراعة')")
-    conn.commit()
-    conn.close()
- 
+        ]
+        for p in products:
+            cur.execute("""INSERT INTO products (name,description,price,old_price,stock,category_id,unit,featured)
+                          VALUES (%s,%s,%s,%s,%s,%s,%s,%s)""", p)
+
+        cur.execute("INSERT INTO admins (username,password) VALUES (%s,%s) ON CONFLICT DO NOTHING", ('admin','admin123'))
+
+        defaults = [
+            ('logo_type','emoji'),('logo_emoji','🌿'),('logo_image',''),
+            ('banner_image',''),('site_name','الزراعة'),
+        ]
+        for k,v in defaults:
+            cur.execute("INSERT INTO settings (key,value) VALUES (%s,%s) ON CONFLICT DO NOTHING", (k,v))
+
+    conn.commit(); cur.close(); conn.close()
+
 def login_required(f):
     @wraps(f)
     def decorated(*args, **kwargs):
@@ -130,14 +150,14 @@ def login_required(f):
             return redirect("/admin/login")
         return f(*args, **kwargs)
     return decorated
- 
+
 jinja_env = Environment()
- 
+
 def render(tmpl_str, **ctx):
     ctx['session'] = session
     t = jinja_env.from_string(tmpl_str)
     return make_response(t.render(**ctx))
- 
+
 # ══════════════════════════════════════════════════════════════
 # STATIC UPLOADS
 # ══════════════════════════════════════════════════════════════
@@ -145,59 +165,61 @@ def render(tmpl_str, **ctx):
 def uploaded_file(filename):
     from flask import send_from_directory
     return send_from_directory(app.config['UPLOAD_FOLDER'], filename)
- 
+
 # ══════════════════════════════════════════════════════════════
 # API
 # ══════════════════════════════════════════════════════════════
 @app.route("/api/categories")
 def api_categories():
-    conn = get_db()
-    cats = conn.execute("SELECT * FROM categories ORDER BY id").fetchall()
-    conn.close()
+    conn = get_db(); cur = conn.cursor()
+    cur.execute("SELECT * FROM categories ORDER BY id")
+    cats = cur.fetchall()
+    cur.close(); conn.close()
     return jsonify([dict(r) for r in cats])
- 
+
 @app.route("/api/products")
 def api_products():
     cat = request.args.get("category")
     search = request.args.get("search","")
-    conn = get_db()
+    conn = get_db(); cur = conn.cursor()
     q = "SELECT p.*,c.name as cat_name FROM products p LEFT JOIN categories c ON p.category_id=c.id"
     params = []
     if cat:
-        q += " WHERE p.category_id=?"
+        q += " WHERE p.category_id=%s"
         params.append(cat)
     if search:
-        q += " AND p.name LIKE ?" if cat else " WHERE p.name LIKE ?"
+        q += " AND p.name ILIKE %s" if cat else " WHERE p.name ILIKE %s"
         params.append(f"%{search}%")
-    rows = conn.execute(q, params).fetchall()
-    conn.close()
+    cur.execute(q, params)
+    rows = cur.fetchall()
+    cur.close(); conn.close()
     return jsonify([dict(r) for r in rows])
- 
+
 @app.route("/api/products/featured")
 def api_featured():
-    conn = get_db()
-    rows = conn.execute("SELECT p.*,c.name as cat_name FROM products p LEFT JOIN categories c ON p.category_id=c.id WHERE p.featured=1 LIMIT 8").fetchall()
-    conn.close()
+    conn = get_db(); cur = conn.cursor()
+    cur.execute("SELECT p.*,c.name as cat_name FROM products p LEFT JOIN categories c ON p.category_id=c.id WHERE p.featured=1 LIMIT 8")
+    rows = cur.fetchall()
+    cur.close(); conn.close()
     return jsonify([dict(r) for r in rows])
- 
+
 @app.route("/api/orders", methods=["POST"])
 def api_place_order():
     data = request.json
-    conn = get_db()
-    c = conn.cursor()
-    c.execute("INSERT INTO orders (customer_name,customer_phone,customer_address,total) VALUES (?,?,?,?)",
-              (data["name"], data["phone"], data["address"], data["total"]))
-    oid = c.lastrowid
+    conn = get_db(); cur = conn.cursor()
+    cur.execute("INSERT INTO orders (customer_name,customer_phone,customer_address,total) VALUES (%s,%s,%s,%s) RETURNING id",
+                (data["name"], data["phone"], data["address"], data["total"]))
+    oid = cur.fetchone()['id']
     for item in data["items"]:
-        c.execute("INSERT INTO order_items (order_id,product_id,qty,price) VALUES (?,?,?,?)",
-                  (oid, item["id"], item["qty"], item["price"]))
+        cur.execute("INSERT INTO order_items (order_id,product_id,qty,price) VALUES (%s,%s,%s,%s)",
+                    (oid, item["id"], item["qty"], item["price"]))
     try:
-        c.execute("INSERT OR IGNORE INTO customers (name,phone,address) VALUES (?,?,?)",
-                  (data["name"], data["phone"], data["address"]))
+        cur.execute("INSERT INTO customers (name,phone,address) VALUES (%s,%s,%s) ON CONFLICT DO NOTHING",
+                    (data["name"], data["phone"], data["address"]))
     except: pass
-    conn.commit(); conn.close()
+    conn.commit(); cur.close(); conn.close()
     return jsonify({"success": True, "order_id": oid})
- 
+
 # ══════════════════════════════════════════════════════════════
 # ADMIN
 # ══════════════════════════════════════════════════════════════
@@ -206,44 +228,47 @@ def admin_login():
     error = ""
     if request.method == "POST":
         u, p = request.form["username"], request.form["password"]
-        conn = get_db()
-        admin = conn.execute("SELECT * FROM admins WHERE username=? AND password=?", (u,p)).fetchone()
-        conn.close()
+        conn = get_db(); cur = conn.cursor()
+        cur.execute("SELECT * FROM admins WHERE username=%s AND password=%s", (u,p))
+        admin = cur.fetchone()
+        cur.close(); conn.close()
         if admin:
             session["admin"] = u
             return redirect("/admin")
         error = "اسم المستخدم أو كلمة المرور غلط"
     return render(TMPL_LOGIN, error=error)
- 
+
 @app.route("/admin/logout")
 def admin_logout():
     session.pop("admin", None)
     return redirect("/admin/login")
- 
+
 @app.route("/admin")
 @login_required
 def admin_index():
-    conn = get_db()
-    stats = {
-        "products": conn.execute("SELECT COUNT(*) FROM products").fetchone()[0],
-        "orders": conn.execute("SELECT COUNT(*) FROM orders").fetchone()[0],
-        "new_orders": conn.execute("SELECT COUNT(*) FROM orders WHERE status='جديد'").fetchone()[0],
-        "revenue": conn.execute("SELECT COALESCE(SUM(total),0) FROM orders").fetchone()[0],
-        "customers": conn.execute("SELECT COUNT(*) FROM customers").fetchone()[0],
-    }
-    recent_orders = conn.execute("SELECT * FROM orders ORDER BY created_at DESC LIMIT 7").fetchall()
-    conn.close()
+    conn = get_db(); cur = conn.cursor()
+    cur.execute("SELECT COUNT(*) FROM products"); stats_p = cur.fetchone()['count']
+    cur.execute("SELECT COUNT(*) FROM orders"); stats_o = cur.fetchone()['count']
+    cur.execute("SELECT COUNT(*) FROM orders WHERE status='جديد'"); stats_n = cur.fetchone()['count']
+    cur.execute("SELECT COALESCE(SUM(total),0) FROM orders"); stats_r = cur.fetchone()['coalesce']
+    cur.execute("SELECT COUNT(*) FROM customers"); stats_c = cur.fetchone()['count']
+    stats = {"products":stats_p,"orders":stats_o,"new_orders":stats_n,"revenue":stats_r,"customers":stats_c}
+    cur.execute("SELECT * FROM orders ORDER BY created_at DESC LIMIT 7")
+    recent_orders = cur.fetchall()
+    cur.close(); conn.close()
     return render(TMPL_ADMIN_INDEX, stats=stats, orders=recent_orders)
- 
+
 @app.route("/admin/products")
 @login_required
 def admin_products():
-    conn = get_db()
-    products = conn.execute("SELECT p.*,c.name as cat_name FROM products p LEFT JOIN categories c ON p.category_id=c.id ORDER BY p.id DESC").fetchall()
-    categories = conn.execute("SELECT * FROM categories ORDER BY id").fetchall()
-    conn.close()
+    conn = get_db(); cur = conn.cursor()
+    cur.execute("SELECT p.*,c.name as cat_name FROM products p LEFT JOIN categories c ON p.category_id=c.id ORDER BY p.id DESC")
+    products = cur.fetchall()
+    cur.execute("SELECT * FROM categories ORDER BY id")
+    categories = cur.fetchall()
+    cur.close(); conn.close()
     return render(TMPL_ADMIN_PRODUCTS, products=products, categories=categories)
- 
+
 @app.route("/admin/products/add", methods=["POST"])
 @login_required
 def admin_add_product():
@@ -255,20 +280,19 @@ def admin_add_product():
             filename = secure_filename(file.filename)
             file.save(os.path.join(app.config['UPLOAD_FOLDER'], filename))
             image_url = f'/static/uploads/{filename}'
-    conn = get_db()
-    conn.execute("INSERT INTO products (name,description,price,old_price,stock,category_id,unit,featured,image_url) VALUES (?,?,?,?,?,?,?,?,?)",
+    conn = get_db(); cur = conn.cursor()
+    cur.execute("INSERT INTO products (name,description,price,old_price,stock,category_id,unit,featured,image_url) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)",
         (f["name"], f.get("description",""), float(f["price"]),
          float(f["old_price"]) if f.get("old_price") else None,
          int(f["stock"]), int(f["category_id"]), f["unit"],
          1 if f.get("featured") else 0, image_url))
-    conn.commit(); conn.close()
+    conn.commit(); cur.close(); conn.close()
     return redirect("/admin/products")
- 
+
 @app.route("/admin/products/edit/<int:pid>", methods=["POST"])
 @login_required
 def admin_edit_product(pid):
     f = request.form
-    conn = get_db()
     new_image_url = None
     if 'image' in request.files:
         file = request.files['image']
@@ -276,99 +300,104 @@ def admin_edit_product(pid):
             filename = secure_filename(file.filename)
             file.save(os.path.join(app.config['UPLOAD_FOLDER'], filename))
             new_image_url = f'/static/uploads/{filename}'
+    conn = get_db(); cur = conn.cursor()
     if new_image_url:
-        conn.execute("UPDATE products SET name=?,description=?,price=?,old_price=?,stock=?,category_id=?,unit=?,featured=?,image_url=? WHERE id=?",
+        cur.execute("UPDATE products SET name=%s,description=%s,price=%s,old_price=%s,stock=%s,category_id=%s,unit=%s,featured=%s,image_url=%s WHERE id=%s",
             (f["name"], f.get("description",""), float(f["price"]),
              float(f["old_price"]) if f.get("old_price") else None,
              int(f["stock"]), int(f["category_id"]), f["unit"],
              1 if f.get("featured") else 0, new_image_url, pid))
     else:
-        conn.execute("UPDATE products SET name=?,description=?,price=?,old_price=?,stock=?,category_id=?,unit=?,featured=? WHERE id=?",
+        cur.execute("UPDATE products SET name=%s,description=%s,price=%s,old_price=%s,stock=%s,category_id=%s,unit=%s,featured=%s WHERE id=%s",
             (f["name"], f.get("description",""), float(f["price"]),
              float(f["old_price"]) if f.get("old_price") else None,
              int(f["stock"]), int(f["category_id"]), f["unit"],
              1 if f.get("featured") else 0, pid))
-    conn.commit(); conn.close()
+    conn.commit(); cur.close(); conn.close()
     return redirect("/admin/products")
- 
+
 @app.route("/admin/products/delete/<int:pid>")
 @login_required
 def admin_delete_product(pid):
-    conn = get_db()
-    conn.execute("DELETE FROM products WHERE id=?", (pid,))
-    conn.commit(); conn.close()
+    conn = get_db(); cur = conn.cursor()
+    cur.execute("DELETE FROM products WHERE id=%s", (pid,))
+    conn.commit(); cur.close(); conn.close()
     return redirect("/admin/products")
- 
+
 @app.route("/admin/categories")
 @login_required
 def admin_categories():
-    conn = get_db()
-    cats = conn.execute("SELECT c.*,(SELECT COUNT(*) FROM products WHERE category_id=c.id) as count FROM categories c ORDER BY c.id").fetchall()
-    conn.close()
+    conn = get_db(); cur = conn.cursor()
+    cur.execute("SELECT c.*,(SELECT COUNT(*) FROM products WHERE category_id=c.id) as count FROM categories c ORDER BY c.id")
+    cats = cur.fetchall()
+    cur.close(); conn.close()
     return render(TMPL_ADMIN_CATS, categories=cats)
- 
+
 @app.route("/admin/categories/add", methods=["POST"])
 @login_required
 def admin_add_category():
-    conn = get_db()
-    conn.execute("INSERT INTO categories (name,icon,type) VALUES (?,?,?)",
+    conn = get_db(); cur = conn.cursor()
+    cur.execute("INSERT INTO categories (name,icon,type) VALUES (%s,%s,%s)",
         (request.form["name"], request.form["icon"], request.form.get("type","main")))
-    conn.commit(); conn.close()
+    conn.commit(); cur.close(); conn.close()
     return redirect("/admin/categories")
- 
+
 @app.route("/admin/categories/edit/<int:cid>", methods=["POST"])
 @login_required
 def admin_edit_category(cid):
     f = request.form
-    conn = get_db()
-    conn.execute("UPDATE categories SET name=?,icon=?,type=? WHERE id=?",
+    conn = get_db(); cur = conn.cursor()
+    cur.execute("UPDATE categories SET name=%s,icon=%s,type=%s WHERE id=%s",
         (f["name"], f["icon"], f.get("type","main"), cid))
-    conn.commit(); conn.close()
+    conn.commit(); cur.close(); conn.close()
     return redirect("/admin/categories")
- 
+
 @app.route("/admin/categories/delete/<int:cid>")
 @login_required
 def admin_delete_category(cid):
-    conn = get_db()
-    conn.execute("UPDATE products SET category_id=NULL WHERE category_id=?", (cid,))
-    conn.execute("DELETE FROM categories WHERE id=?", (cid,))
-    conn.commit(); conn.close()
+    conn = get_db(); cur = conn.cursor()
+    cur.execute("UPDATE products SET category_id=NULL WHERE category_id=%s", (cid,))
+    cur.execute("DELETE FROM categories WHERE id=%s", (cid,))
+    conn.commit(); cur.close(); conn.close()
     return redirect("/admin/categories")
- 
+
 @app.route("/admin/orders")
 @login_required
 def admin_orders():
-    conn = get_db()
-    orders = conn.execute("SELECT * FROM orders ORDER BY created_at DESC").fetchall()
-    conn.close()
+    conn = get_db(); cur = conn.cursor()
+    cur.execute("SELECT * FROM orders ORDER BY created_at DESC")
+    orders = cur.fetchall()
+    cur.close(); conn.close()
     return render(TMPL_ADMIN_ORDERS, orders=orders)
- 
+
 @app.route("/admin/orders/<int:oid>")
 @login_required
 def admin_order_detail(oid):
-    conn = get_db()
-    order = conn.execute("SELECT * FROM orders WHERE id=?", (oid,)).fetchone()
-    items = conn.execute("SELECT oi.*,p.name FROM order_items oi LEFT JOIN products p ON oi.product_id=p.id WHERE oi.order_id=?", (oid,)).fetchall()
-    conn.close()
+    conn = get_db(); cur = conn.cursor()
+    cur.execute("SELECT * FROM orders WHERE id=%s", (oid,))
+    order = cur.fetchone()
+    cur.execute("SELECT oi.*,p.name FROM order_items oi LEFT JOIN products p ON oi.product_id=p.id WHERE oi.order_id=%s", (oid,))
+    items = cur.fetchall()
+    cur.close(); conn.close()
     return render(TMPL_ADMIN_ORDER_DETAIL, order=order, items=items)
- 
+
 @app.route("/admin/orders/status/<int:oid>", methods=["POST"])
 @login_required
 def admin_update_status(oid):
-    conn = get_db()
-    conn.execute("UPDATE orders SET status=? WHERE id=?", (request.form["status"], oid))
-    conn.commit(); conn.close()
+    conn = get_db(); cur = conn.cursor()
+    cur.execute("UPDATE orders SET status=%s WHERE id=%s", (request.form["status"], oid))
+    conn.commit(); cur.close(); conn.close()
     return redirect(f"/admin/orders/{oid}")
- 
+
 @app.route("/admin/customers")
 @login_required
 def admin_customers():
-    conn = get_db()
-    customers = conn.execute("SELECT * FROM customers ORDER BY created_at DESC").fetchall()
-    conn.close()
+    conn = get_db(); cur = conn.cursor()
+    cur.execute("SELECT * FROM customers ORDER BY created_at DESC")
+    customers = cur.fetchall()
+    cur.close(); conn.close()
     return render(TMPL_ADMIN_CUSTOMERS, customers=customers)
- 
-# ── إعدادات الموقع ──────────────────────────────────────────
+
 @app.route("/admin/settings")
 @login_required
 def admin_settings():
@@ -380,47 +409,36 @@ def admin_settings():
         'site_name': get_setting('site_name', 'الزراعة'),
     }
     return render(TMPL_ADMIN_SETTINGS, settings=settings)
- 
+
 @app.route("/admin/settings/save", methods=["POST"])
 @login_required
 def admin_settings_save():
     f = request.form
- 
-    # Site name
     if f.get('site_name'):
         set_setting('site_name', f['site_name'])
- 
-    # Logo
     logo_type = f.get('logo_type', 'emoji')
     set_setting('logo_type', logo_type)
- 
     if logo_type == 'emoji' and f.get('logo_emoji'):
         set_setting('logo_emoji', f['logo_emoji'])
- 
     if logo_type == 'image' and 'logo_image' in request.files:
         file = request.files['logo_image']
         if file and file.filename and allowed_file(file.filename):
             filename = 'logo_' + secure_filename(file.filename)
             file.save(os.path.join(app.config['UPLOAD_FOLDER'], filename))
             set_setting('logo_image', f'/static/uploads/{filename}')
- 
-    # Banner image
     if 'banner_image' in request.files:
         file = request.files['banner_image']
         if file and file.filename and allowed_file(file.filename):
             filename = 'banner_' + secure_filename(file.filename)
             file.save(os.path.join(app.config['UPLOAD_FOLDER'], filename))
             set_setting('banner_image', f'/static/uploads/{filename}')
- 
     if f.get('remove_banner'):
         set_setting('banner_image', '')
- 
     if f.get('remove_logo_image'):
         set_setting('logo_image', '')
         set_setting('logo_type', 'emoji')
- 
     return redirect("/admin/settings")
- 
+
 @app.route("/")
 def index():
     settings = {
@@ -431,12 +449,14 @@ def index():
         'site_name': get_setting('site_name', 'الزراعة'),
     }
     return render(TMPL_APP, **settings)
- 
- 
+
+with app.app_context():
+    init_db()
+
 # ══════════════════════════════════════════════════════════════
 # TEMPLATES
 # ══════════════════════════════════════════════════════════════
- 
+
 TMPL_APP = """<!DOCTYPE html>
 <html lang="ar" dir="rtl">
 <head>
@@ -583,7 +603,7 @@ body{font-family:'Cairo',sans-serif;background:var(--bg);color:var(--text)}
 </style>
 </head>
 <body>
- 
+
 <!-- Header -->
 <div class="header">
   <div class="header-top">
@@ -623,7 +643,7 @@ body{font-family:'Cairo',sans-serif;background:var(--bg);color:var(--text)}
     <a href="#" class="active" onclick="filterCat(0,this)">الرئيسية</a>
   </nav>
 </div>
- 
+
 <!-- Pages -->
 <div class="page active" id="page-home">
   <!-- Banner -->
@@ -644,7 +664,7 @@ body{font-family:'Cairo',sans-serif;background:var(--bg);color:var(--text)}
     <div class="banner-emoji-side">🌾</div>
     {% endif %}
   </div>
- 
+
   <!-- Categories -->
   <div class="section">
     <div class="sec-header">
@@ -652,7 +672,7 @@ body{font-family:'Cairo',sans-serif;background:var(--bg);color:var(--text)}
     </div>
     <div class="cats-scroll" id="cats-list"><div class="spinner"></div></div>
   </div>
- 
+
   <!-- Features -->
   <div class="features">
     <div class="feat-item"><div class="feat-icon">🔍</div><div><div class="feat-title">بحث متقدم</div><div class="feat-sub">بحث برقم التسجيل أو اسم المنتج</div></div></div>
@@ -660,7 +680,7 @@ body{font-family:'Cairo',sans-serif;background:var(--bg);color:var(--text)}
     <div class="feat-item"><div class="feat-icon">✅</div><div><div class="feat-title">منتجات أصلية</div><div class="feat-sub">جميع المنتجات من شركات موثقة</div></div></div>
     <div class="feat-item"><div class="feat-icon">💬</div><div><div class="feat-title">دعم فني</div><div class="feat-sub">استشارة زراعية قبل وبعد الشراء</div></div></div>
   </div>
- 
+
   <!-- Products -->
   <div class="section">
     <div class="sec-header">
@@ -670,20 +690,20 @@ body{font-family:'Cairo',sans-serif;background:var(--bg);color:var(--text)}
     <div class="products-grid" id="products-grid"><div class="spinner"></div></div>
   </div>
 </div>
- 
+
 <!-- Cart Page -->
 <div class="page" id="page-cart">
   <div style="padding:16px 16px 8px;font-size:16px;font-weight:700">🛒 سلة المشتريات</div>
   <div id="cart-list"></div>
   <div id="cart-total-box"></div>
 </div>
- 
+
 <!-- Orders Page -->
 <div class="page" id="page-orders">
   <div style="padding:16px 16px 8px;font-size:16px;font-weight:700">📦 طلباتي</div>
   <div class="empty-state"><div class="empty-icon">📦</div><div>طلباتك ستظهر هنا بعد الشراء</div></div>
 </div>
- 
+
 <!-- Profile Page -->
 <div class="page" id="page-profile">
   <div style="background:linear-gradient(135deg,var(--green),#388e3c);color:#fff;padding:30px 20px;text-align:center;margin-bottom:16px">
@@ -700,7 +720,7 @@ body{font-family:'Cairo',sans-serif;background:var(--bg);color:var(--text)}
     </div>
   </div>
 </div>
- 
+
 <!-- Order Modal -->
 <div class="overlay" id="order-overlay">
   <div class="modal">
@@ -713,7 +733,7 @@ body{font-family:'Cairo',sans-serif;background:var(--bg);color:var(--text)}
     <button class="cancel-btn" onclick="closeModal()">إلغاء</button>
   </div>
 </div>
- 
+
 <!-- Bottom Nav -->
 <div class="bottom-nav">
   <button class="bnav-btn active" onclick="showPage('home')"><span>🏠</span>الرئيسية</button>
@@ -721,14 +741,14 @@ body{font-family:'Cairo',sans-serif;background:var(--bg);color:var(--text)}
   <button class="bnav-btn" onclick="showPage('orders')"><span>📦</span>طلباتي</button>
   <button class="bnav-btn" onclick="showPage('profile')"><span>👤</span>حسابي</button>
 </div>
- 
+
 <div class="toast" id="toast"></div>
- 
+
 <script>
 const EMOJIS={1:'🦟',2:'🌱',3:'💊',4:'🏷️',null:'🌿'};
 let cart=JSON.parse(localStorage.getItem('cart')||'[]');
 let allProducts=[];
- 
+
 function showPage(n){
   document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
   document.querySelectorAll('.bnav-btn').forEach(b=>b.classList.remove('active'));
@@ -737,20 +757,20 @@ function showPage(n){
   document.querySelectorAll('.bnav-btn')[idx]?.classList.add('active');
   if(n==='cart') renderCart();
 }
- 
+
 function toast(msg){
   const t=document.getElementById('toast');
   t.textContent=msg;t.classList.add('show');
   setTimeout(()=>t.classList.remove('show'),2200);
 }
- 
+
 function updateCartCount(){
   const n=cart.reduce((s,i)=>s+i.qty,0);
   document.getElementById('cart-count').textContent=n;
   const b=document.getElementById('cart-badge');
   if(n>0){b.style.display='flex';b.textContent=n;}else{b.style.display='none';}
 }
- 
+
 async function loadCategories(){
   const res=await fetch('/api/categories');
   const cats=await res.json();
@@ -765,13 +785,13 @@ async function loadCategories(){
     list.innerHTML+=`<div class="cat-card" onclick="filterCat(${c.id},this)"><div class="cat-icon">${c.icon}</div><div class="cat-name">${c.name}</div></div>`;
   });
 }
- 
+
 async function loadProducts(){
   const res=await fetch('/api/products/featured');
   allProducts=await res.json();
   renderProducts(allProducts,'منتجات مميزة');
 }
- 
+
 async function filterCat(id,el){
   document.querySelectorAll('.cat-card').forEach(c=>c.classList.remove('active'));
   document.querySelectorAll('.nav a').forEach(a=>a.classList.remove('active'));
@@ -784,7 +804,7 @@ async function filterCat(id,el){
   const catName=id?(document.querySelector(`.cat-card.active .cat-name`)?.textContent||'المنتجات'):'جميع المنتجات';
   renderProducts(prods,catName);
 }
- 
+
 function toggleMobileSearch(){
   const bar=document.getElementById('mobile-search-bar');
   bar.classList.toggle('open');
@@ -795,14 +815,14 @@ function toggleMobileSearch(){
     loadProducts();
   }
 }
- 
+
 async function searchProducts(q){
   if(!q){loadProducts();return;}
   const res=await fetch(`/api/products?search=${encodeURIComponent(q)}`);
   const prods=await res.json();
   renderProducts(prods,`نتائج البحث: "${q}"`);
 }
- 
+
 function renderProducts(products,title){
   document.getElementById('products-title').textContent=title||'المنتجات';
   const g=document.getElementById('products-grid');
@@ -827,7 +847,7 @@ function renderProducts(products,title){
       </div>
     </div>`).join('');
 }
- 
+
 function addToCart(id,name,price,unit,catId,imageUrl){
   const ex=cart.find(i=>i.id==id);
   if(ex){ex.qty++;}else{cart.push({id,name,price,unit,catId,imageUrl,qty:1});}
@@ -835,7 +855,7 @@ function addToCart(id,name,price,unit,catId,imageUrl){
   updateCartCount();
   toast('✅ تم إضافة '+name+' للسلة');
 }
- 
+
 function renderCart(){
   const el=document.getElementById('cart-list');
   const tot=document.getElementById('cart-total-box');
@@ -868,7 +888,7 @@ function renderCart(){
       <button class="checkout-btn" onclick="openModal()">إتمام الطلب ←</button>
     </div>`;
 }
- 
+
 function changeQty(id,d){
   const i=cart.find(x=>x.id==id);
   if(!i)return;
@@ -877,13 +897,13 @@ function changeQty(id,d){
   localStorage.setItem('cart',JSON.stringify(cart));
   updateCartCount();renderCart();
 }
- 
+
 function removeItem(id){
   cart=cart.filter(x=>x.id!=id);
   localStorage.setItem('cart',JSON.stringify(cart));
   updateCartCount();renderCart();
 }
- 
+
 function openModal(){
   if(!cart.length){toast('السلة فارغة!');return;}
   const sub=cart.reduce((s,i)=>s+i.price*i.qty,0);
@@ -892,9 +912,9 @@ function openModal(){
     `<hr style="margin:8px 0"><strong>الإجمالي: ${(sub+20).toFixed(2)} ج.م</strong>`;
   document.getElementById('order-overlay').classList.add('open');
 }
- 
+
 function closeModal(){document.getElementById('order-overlay').classList.remove('open');}
- 
+
 async function submitOrder(){
   const name=document.getElementById('f-name').value.trim();
   const phone=document.getElementById('f-phone').value.trim();
@@ -915,15 +935,15 @@ async function submitOrder(){
   }catch(e){toast('خطأ في الاتصال');}
   btn.disabled=false;btn.textContent='تأكيد الطلب';
 }
- 
+
 updateCartCount();
 loadCategories();
 loadProducts();
 </script>
 </body>
 </html>"""
- 
- 
+
+
 TMPL_LOGIN = """<!DOCTYPE html>
 <html lang="ar" dir="rtl">
 <head>
@@ -959,7 +979,7 @@ input:focus{border-color:#4caf50}
 </div>
 </body>
 </html>"""
- 
+
 ADMIN_BASE_STYLE = """
 <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;900&display=swap" rel="stylesheet">
 <style>
@@ -1021,7 +1041,7 @@ tr:hover td{background:#f9fdf9}
 .prod-thumb{width:46px;height:46px;border-radius:8px;object-fit:contain;border:1px solid #eee;background:#f9f9f9;padding:3px}
 </style>
 """
- 
+
 TMPL_ADMIN_INDEX = """<!DOCTYPE html>
 <html lang="ar" dir="rtl">
 <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>لوحة التحكم - الزراعة</title>""" + ADMIN_BASE_STYLE + """</head>
@@ -1063,7 +1083,7 @@ TMPL_ADMIN_INDEX = """<!DOCTYPE html>
   </div>
 </div>
 </body></html>"""
- 
+
 TMPL_ADMIN_SETTINGS = """<!DOCTYPE html>
 <html lang="ar" dir="rtl">
 <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>إعدادات الموقع - الزراعة</title>""" + ADMIN_BASE_STYLE + """</head>
@@ -1083,9 +1103,9 @@ TMPL_ADMIN_SETTINGS = """<!DOCTYPE html>
 </div>
 <div class="main">
   <div class="topbar"><h2>⚙️ إعدادات الموقع</h2><a href="/" target="_blank" class="btn btn-green">معاينة المتجر ←</a></div>
- 
+
   <form method="POST" action="/admin/settings/save" enctype="multipart/form-data">
- 
+
     <!-- اسم الموقع -->
     <div class="card">
       <div class="card-title">🏪 اسم الموقع</div>
@@ -1094,12 +1114,12 @@ TMPL_ADMIN_SETTINGS = """<!DOCTYPE html>
         <input name="site_name" value="{{ settings.site_name }}" placeholder="الزراعة">
       </div>
     </div>
- 
+
     <!-- اللوجو -->
     <div class="card">
       <div class="card-title">🖼️ أيقونة / لوجو الموقع</div>
       <p style="font-size:12px;color:#888;margin-bottom:14px">اختار إما إيموجي أو صورة تظهر في ركن الهيدر</p>
- 
+
       <div class="fg">
         <label>نوع الأيقونة</label>
         <select name="logo_type" id="logo-type-sel" onchange="toggleLogoType(this.value)">
@@ -1107,7 +1127,7 @@ TMPL_ADMIN_SETTINGS = """<!DOCTYPE html>
           <option value="image" {% if settings.logo_type == 'image' %}selected{% endif %}>صورة مرفوعة</option>
         </select>
       </div>
- 
+
       <!-- Emoji option -->
       <div id="logo-emoji-box" style="{% if settings.logo_type == 'image' %}display:none{% endif %}">
         <div class="fg">
@@ -1116,7 +1136,7 @@ TMPL_ADMIN_SETTINGS = """<!DOCTYPE html>
         </div>
         <div style="font-size:13px;color:#888">مثال: 🌿 🌱 🌾 🌻 🍃 🌲</div>
       </div>
- 
+
       <!-- Image option -->
       <div id="logo-image-box" style="{% if settings.logo_type == 'emoji' %}display:none{% endif %}">
         {% if settings.logo_image %}
@@ -1145,12 +1165,12 @@ TMPL_ADMIN_SETTINGS = """<!DOCTYPE html>
         </div>
       </div>
     </div>
- 
+
     <!-- صورة البانر -->
     <div class="card">
       <div class="card-title">🎨 صورة البانر الرئيسي</div>
       <p style="font-size:12px;color:#888;margin-bottom:14px">الصورة تظهر على يمين نص "كل ما يحتاجه المزارع لمحصول أفضل" — يفضل صورة بخلفية شفافة (PNG)</p>
- 
+
       {% if settings.banner_image %}
       <div style="margin-bottom:14px;padding:14px;background:#f1f8e9;border-radius:10px;display:flex;align-items:center;gap:14px">
         <img src="{{ settings.banner_image }}" style="width:100px;height:80px;object-fit:contain;border-radius:8px;border:1px solid #e0e0e0;background:linear-gradient(135deg,#1a5c2a,#388e3c);padding:6px">
@@ -1162,7 +1182,7 @@ TMPL_ADMIN_SETTINGS = """<!DOCTYPE html>
         </div>
       </div>
       {% endif %}
- 
+
       <div class="fg">
         <label>رفع صورة بانر جديدة</label>
         <div class="upload-zone" id="banner-zone">
@@ -1177,17 +1197,17 @@ TMPL_ADMIN_SETTINGS = """<!DOCTYPE html>
         </div>
       </div>
     </div>
- 
+
     <button type="submit" class="btn btn-green" style="padding:13px 40px;font-size:15px">💾 حفظ الإعدادات</button>
   </form>
 </div>
- 
+
 <script>
 function toggleLogoType(v){
   document.getElementById('logo-emoji-box').style.display = v==='emoji' ? '' : 'none';
   document.getElementById('logo-image-box').style.display = v==='image' ? '' : 'none';
 }
- 
+
 function previewUpload(input, zoneId, prevId){
   if(!input.files || !input.files[0]) return;
   const reader = new FileReader();
@@ -1199,7 +1219,7 @@ function previewUpload(input, zoneId, prevId){
   };
   reader.readAsDataURL(input.files[0]);
 }
- 
+
 function removePreview(zoneId, prevId){
   const zone = document.getElementById(zoneId);
   const prev = document.getElementById(prevId);
@@ -1209,7 +1229,7 @@ function removePreview(zoneId, prevId){
 }
 </script>
 </body></html>"""
- 
+
 TMPL_ADMIN_CATS = """<!DOCTYPE html>
 <html lang="ar" dir="rtl">
 <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>التصنيفات - الزراعة</title>""" + ADMIN_BASE_STYLE + """</head>
@@ -1294,7 +1314,7 @@ function editCat(id,name,icon,type){
 }
 </script>
 </body></html>"""
- 
+
 TMPL_ADMIN_PRODUCTS = """<!DOCTYPE html>
 <html lang="ar" dir="rtl">
 <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>المنتجات - الزراعة</title>""" + ADMIN_BASE_STYLE + """</head>
@@ -1343,7 +1363,7 @@ TMPL_ADMIN_PRODUCTS = """<!DOCTYPE html>
   </tbody></table>
   </div>
 </div>
- 
+
 <!-- Add Modal -->
 <div class="overlay" id="add-m">
   <div class="modal">
@@ -1383,7 +1403,7 @@ TMPL_ADMIN_PRODUCTS = """<!DOCTYPE html>
     </form>
   </div>
 </div>
- 
+
 <!-- Edit Modal -->
 <div class="overlay" id="edit-m">
   <div class="modal">
@@ -1426,7 +1446,7 @@ TMPL_ADMIN_PRODUCTS = """<!DOCTYPE html>
     </form>
   </div>
 </div>
- 
+
 <script>
 function previewUpload(input, zoneId, prevId){
   if(!input.files || !input.files[0]) return;
@@ -1439,7 +1459,7 @@ function previewUpload(input, zoneId, prevId){
   };
   reader.readAsDataURL(input.files[0]);
 }
- 
+
 function removePreview(zoneId, prevId){
   const zone = document.getElementById(zoneId);
   const prev = document.getElementById(prevId);
@@ -1447,7 +1467,7 @@ function removePreview(zoneId, prevId){
   zone.classList.remove('has-img');
   zone.querySelector('input[type=file]').value = '';
 }
- 
+
 function editProd(id,name,desc,price,oprice,stock,catId,unit,featured,imageUrl){
   document.getElementById('edit-form').action='/admin/products/edit/'+id;
   document.getElementById('e-name').value=name;
@@ -1469,7 +1489,7 @@ function editProd(id,name,desc,price,oprice,stock,catId,unit,featured,imageUrl){
 }
 </script>
 </body></html>"""
- 
+
 TMPL_ADMIN_ORDERS = """<!DOCTYPE html>
 <html lang="ar" dir="rtl">
 <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>الطلبات - الزراعة</title>""" + ADMIN_BASE_STYLE + """</head>
@@ -1506,7 +1526,7 @@ TMPL_ADMIN_ORDERS = """<!DOCTYPE html>
   </div>
 </div>
 </body></html>"""
- 
+
 TMPL_ADMIN_ORDER_DETAIL = """<!DOCTYPE html>
 <html lang="ar" dir="rtl">
 <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>تفاصيل الطلب - الزراعة</title>""" + ADMIN_BASE_STYLE + """</head>
@@ -1562,7 +1582,7 @@ TMPL_ADMIN_ORDER_DETAIL = """<!DOCTYPE html>
   </div>
 </div>
 </body></html>"""
- 
+
 TMPL_ADMIN_CUSTOMERS = """<!DOCTYPE html>
 <html lang="ar" dir="rtl">
 <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>العملاء - الزراعة</title>""" + ADMIN_BASE_STYLE + """</head>
@@ -1592,7 +1612,6 @@ TMPL_ADMIN_CUSTOMERS = """<!DOCTYPE html>
   </div>
 </div>
 </body></html>"""
- 
+
 if __name__ == "__main__":
-    init_db()
     app.run(debug=True, port=5000)
