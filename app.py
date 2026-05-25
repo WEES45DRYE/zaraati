@@ -450,8 +450,14 @@ def index():
     }
     return render(TMPL_APP, **settings)
 
-with app.app_context():
-    init_db()
+@app.before_request
+def setup():
+    global _db_initialized
+    if not _db_initialized:
+        init_db()
+        _db_initialized = True
+
+_db_initialized = False
 
 # ══════════════════════════════════════════════════════════════
 # TEMPLATES
